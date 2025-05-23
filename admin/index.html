@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OPSsign2 Admin - Orono Public Schools</title>
+    <link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <div class="logo-section">
+                <h1>OPS Digital Signage Admin</h1>
+                <p>Orono Public Schools</p>
+            </div>
+            <div class="user-section">
+                <div class="user-info">
+                    <img id="userPhoto" src="" alt="User Photo" class="user-photo">
+                    <div class="user-details">
+                        <span id="userName">Loading...</span>
+                        <span id="userEmail" class="user-email">Loading...</span>
+                    </div>
+                </div>
+                <a href="/" class="btn-nav">← Homepage</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <section class="overview-section">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>Total Devices</h3>
+                    <div class="stat-number" id="totalDevices">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Online</h3>
+                    <div class="stat-number online" id="onlineDevices">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Offline</h3>
+                    <div class="stat-number offline" id="offlineDevices">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Templates</h3>
+                    <div class="stat-number" id="totalTemplates">3</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="devices-section">
+            <div class="section-header">
+                <h2>Device Management</h2>
+                <button id="addDeviceBtn" class="btn btn-primary">
+                    <span>+</span> Add Device
+                </button>
+            </div>
+
+            <div class="devices-grid" id="devicesGrid">
+                <!-- Devices will be populated by JavaScript -->
+                <div class="loading">Loading devices...</div>
+            </div>
+        </section>
+
+        <section class="templates-section">
+            <h2>Templates & Themes</h2>
+            <div class="templates-themes-grid">
+                <div class="template-card">
+                    <h3>Standard Template</h3>
+                    <p>Basic presentation with footer</p>
+                    <div class="template-preview">📱</div>
+                </div>
+                <div class="template-card">
+                    <h3>Sidebar Template</h3>
+                    <p>Presentation with weather sidebar</p>
+                    <div class="template-preview">📱</div>
+                </div>
+                <div class="template-card">
+                    <h3>Weather Template</h3>
+                    <p>Detailed weather information</p>
+                    <div class="template-preview">📱</div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Add Device Modal -->
+    <div id="addDeviceModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add New Device</h3>
+                <span class="modal-close">&times;</span>
+            </div>
+            <form id="addDeviceForm">
+                <div class="form-group">
+                    <label for="deviceId">Device ID</label>
+                    <input type="text" id="deviceId" name="deviceId" required
+                           placeholder="e.g., lobby-1, cafe-2">
+                </div>
+                <div class="form-group">
+                    <label for="location">Location</label>
+                    <input type="text" id="location" name="location" required
+                           placeholder="e.g., Main Lobby, Cafeteria">
+                </div>
+                <div class="form-group">
+                    <label for="template">Template</label>
+                    <select id="template" name="template">
+                        <option value="standard">Standard</option>
+                        <option value="sidebar">Sidebar</option>
+                        <option value="weather">Weather</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="theme">Theme</label>
+                    <select id="theme" name="theme">
+                        <option value="default">Default</option>
+                        <option value="dark">Dark</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="slideId">Google Slide ID</label>
+                    <input type="text" id="slideId" name="slideId"
+                           placeholder="Presentation ID from Google Slides">
+                </div>
+                <div class="form-group">
+                    <label for="refreshInterval">Refresh Interval (minutes)</label>
+                    <input type="number" id="refreshInterval" name="refreshInterval"
+                           value="15" min="1" max="120">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelAdd">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Device</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/admin/admin.js"></script>
+</body>
+</html>

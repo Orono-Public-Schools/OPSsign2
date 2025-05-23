@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OPS Digital Signage</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="banner">
+        <img src="/assets/ops-torch.png" alt="Orono Public Schools Logo">
+    </div>
+
+    <div id="slideContainer">
+        <div class="loading">Loading presentation...</div>
+    </div>
+
+    <div id="footer">
+        <div class="device-info">
+            <span id="deviceId">Device: Loading...</span>
+            <span id="lastUpdate">Updated: Loading...</span>
+        </div>
+    </div>
+
+    <script>
+        // Quick test to see if JavaScript is running
+        console.log('JavaScript is loading...');
+
+        class DigitalSignage {
+            constructor() {
+                console.log('DigitalSignage constructor called');
+                this.config = {
+                    deviceId: 'unknown',
+                    slideId: null,
+                    refreshInterval: 15,
+                    template: 'standard',
+                    theme: 'default'
+                };
+                this.init();
+            }
+
+            async init() {
+                // Get device ID from URL parameter
+                const urlParams = new URLSearchParams(window.location.search);
+                this.config.deviceId = urlParams.get('deviceId') || 'unknown';
+
+                // Update device ID display
+                document.getElementById('deviceId').textContent = `Device: ${this.config.deviceId}`;
+
+                // Load device configuration
+                await this.loadDeviceConfig();
+            }
+
+            async loadDeviceConfig() {
+                try {
+                    console.log(`Loading config for device: ${this.config.deviceId}`);
+
+                    const response = await fetch(`/api/device-config/${this.config.deviceId}`);
+
+                    console.log('API Response status:', response.status);
+
+                    if (response.ok) {
+                        const config = await response.json();
+                        console.log('Configuration loaded:', config);
+
+                        this.config = { ...this.config, ...config };
+
+                        // Apply configuration
+                        await this.applyConfiguration();
+
+                        // Set up periodic refresh
+                        this.setupRefresh();
+
+                    } else {
+                        const errorText = await response.text();
+                        console.error('API Error:', errorText);
+                        throw new Error(`Failed to load configuration: ${response.status} - ${errorText}`);
+                    }
+                } catch (error) {
+                    console.error('Error loading device configuration:', error);
+                    this.showError(`Configuration Error: ${error.message}`);
+
+                    // Try to continue with default configuration after a delay
+                    setTimeout(() => {
+                        console.log('Attempting to use default configuration...');
+                        this.applyDefaultConfiguration();
+                    }, 5000);
+                }
+            }
+
+            async applyConfiguration() {
+                try {
+                    // Load template if specified
+                    if (this.config.template && this.config.template !== 'standard') {
+                        await this.loadTemplate(this.config.template);
+                    }
+
+                    // Load theme if specified
+                    if (this.config.theme && this.config.theme !== 'default') {
+                        this.loadTheme(this.config.theme);
+                    }
+
+                    // Initialize Google Slide
+                    if (this.config.slideId) {
+                        this.initializeSlide(this.config.slideId);
+                    } else {
+                        this.showError('No Google Slide ID configured for this device');
+                    }
+
+                    // Update footer information
+                    this.updateFooter();
+
+                } catch (error) {
+                    console.error('Error applying configuration:', error);
+                    this.showError(`Configuration Error: ${error.message}`);
+                }
+            }
+
+            async loadTemplate(templateName) {
+                try {
+                    const response = await fetch(`/templates/${templateName}/index.html.template`);
+
+                    if (response.ok) {
+                        let templateHtml = await response.text();
+
+                        // Replace placeholders in template
+                        templateHtml = templateHtml
+                            .replace(/{LOCATION}/g, this.config.location || 'Orono Public Schools')
+                            .replace(/{PRESENTATION_ID}/g, this.config.slideId || '')
+                            .replace(/{DEVICE_ID}/g, this.config.deviceId)
+                            .replace(/{THEME_PATH}/g, `/themes/${this.config.theme || 'default'}.css`);
+
+                        // Replace body content with template
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = templateHtml;
+
+                        // Preserve scripts
+                        const scripts = document.getElementsByTagName('script');
+                        const scriptContents = Array.from(scripts).map(script => script.outerHTML);
+
+                        // Replace body content
+                        document.body.innerHTML = templateHtml;
+
+                        // Re-add scripts
+                        scriptContents.forEach(scriptHtml => {
+                            document.body.insertAdjacentHTML('beforeend', scriptHtml);
+                        });
+
+                        console.log(`Template "${templateName}" loaded successfully`);
+                    } else {
+                        throw new Error(`Template "${templateName}" not found`);
+                    }
+                } catch (error) {
+                    console.error('Error loading template:', error);
+                    // Continue with default template
+                }
+            }
+
+            loadTheme(themeName) {
+                // Remove any existing custom theme
+                const existingTheme = document.getElementById('custom-theme');
+                if (existingTheme) {
+                    existingTheme.remove();
+                }
+
+                // Add new theme
+                const link = document.createElement('link');
+                link.id = 'custom-theme';
+                link.rel = 'stylesheet';
+                link.href = `/themes/${themeName}.css`;
+                link.onerror = () => {
+                    console.warn(`Theme "${themeName}" not found, using default`);
+                };
+                document.head.appendChild(link);
+            }
+
+            initializeSlide(slideId) {
+                const slideContainer = document.getElementById('slideContainer');
+                if (slideContainer) {
+                    slideContainer.innerHTML = `
+                        <iframe
+                            src="https://docs.google.com/presentation/d/${slideId}/embed?start=true&loop=true&delayms=10000&rm=minimal"
+                            frameborder="0"
+                            width="100%"
+                            height="100%"
+                            allowfullscreen="true">
+                        </iframe>
+                    `;
+                    console.log(`Google Slide initialized: ${slideId}`);
+                } else {
+                    console.error('Slide container not found');
+                }
+            }
+
+            applyDefaultConfiguration() {
+                console.log('Applying default configuration');
+                this.config.slideId = '1E7v2rVGN8TabxalUlXSHE2zEhJxv0tEXiCxE3FD99Ic';
+                this.initializeSlide(this.config.slideId);
+                this.updateFooter();
+            }
+
+            setupRefresh() {
+                const refreshMinutes = this.config.refreshInterval || 15;
+
+                console.log(`Setting up refresh every ${refreshMinutes} minutes`);
+
+                setTimeout(() => {
+                    console.log('Refreshing page...');
+                    window.location.reload();
+                }, refreshMinutes * 60 * 1000);
+            }
+
+            updateFooter() {
+                const lastUpdateElement = document.getElementById('lastUpdate');
+                if (lastUpdateElement) {
+                    lastUpdateElement.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+                }
+            }
+
+            showError(message) {
+                const slideContainer = document.getElementById('slideContainer');
+                if (slideContainer) {
+                    slideContainer.innerHTML = `
+                        <div class="error-message">
+                            <h2>⚠️ Display Error</h2>
+                            <p>${message}</p>
+                            <p class="retry-message">Retrying in 30 seconds...</p>
+                        </div>
+                    `;
+                }
+
+                // Retry after 30 seconds
+                setTimeout(() => {
+                    this.loadDeviceConfig();
+                }, 30000);
+            }
+        }
+
+        // Initialize digital signage when page loads
+        console.log('DOM loaded, creating DigitalSignage instance...');
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOMContentLoaded event fired');
+            new DigitalSignage();
+        });
+    </script>
+</body>
+</html>
