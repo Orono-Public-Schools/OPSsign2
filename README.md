@@ -26,46 +26,6 @@ A centralized digital signage system for Orono Public Schools, built with Node.j
 - Google OAuth credentials
 - Google Sheets for device configuration
 
-## Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/YOUR_USERNAME/OPSsign2.git
-cd OPSsign2```
-
-2. Install dependencies:
-
-```bash
-npm install```
-
-3. Configure environment variables:
-
-```bash
-cp .env.example .env
-```
-
-4. Start the server:
-
-```bash
-node server.js```
-
-5. Access the system:
-
-* Homepage: http://your-server:3000
-* Admin Interface: http://your-server:3000/admin
-
-## Raspberry Pi Setup
-
-Use the setup instructions provided on the homepage, or manually configure each Pi with:
-
-```bash
-#!/bin/bash
-DEVICE_ID="your-device-name"
-SERVER_URL="http://your-server:3000"
-
-chromium-browser --kiosk "${SERVER_URL}/?deviceId=${DEVICE_ID}"
-```
-
 ## Configuration
 Device configurations are stored in a Google Sheet with these columns:
 

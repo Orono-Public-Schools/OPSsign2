@@ -167,10 +167,14 @@ chromium-browser --kiosk --no-first-run --disable-infobars \
     --disable-pinch --overscroll-history-navigation=0 \
     "${SERVER_URL}/?deviceId=${DEVICE_ID}"</pre>
 
-            <h4>3. Make it executable and set to run at startup:</h4>
-            <pre class="setup-code">chmod +x /home/pi/kiosk.sh
-mkdir -p ~/.config/lxsession/LXDE-pi/
-echo "@/home/pi/kiosk.sh" > ~/.config/lxsession/LXDE-pi/autostart</pre>
+            <h4>3. Make it executable</h4>
+            <pre class="setup-code">chmod +x /home/pi/kiosk.sh</pre>
+
+            <h4>4. Edit the crontab (to run at boot):</h4>
+            <pre class="setup-code">crontab -e</pre>
+
+            <h4>5. Add this line at the bottom of crontab:</h4>
+            <pre class="setup-code">@reboot sleep 30 && DISPLAY=:0 /home/pi/kiosk.sh</pre>
 
             <h4>4. Add the device to the admin interface</h4>
             <p>Use the admin dashboard to configure the device's display settings, assign presentations, and set refresh intervals.</p>

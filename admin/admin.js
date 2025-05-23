@@ -2,6 +2,7 @@
 class AdminInterface {
     constructor() {
         this.devices = [];
+        this.editingDevice = null;
         this.init();
     }
 
@@ -197,7 +198,7 @@ class AdminInterface {
                     // Show manual instructions
                     this.showSuccess(`Device "${deviceData.deviceId}" configuration ready!
 
-Please add this device to your Google Sheet manually:
+Please ${isEditing ? 'update' : 'add'} this device in your Google Sheet manually:
 1. Open: https://docs.google.com/spreadsheets/d/1Zmzmg_QXsrPXvB6BR-j9lEExzTZ8sCHBneBJq90dlw0
 2. ${isEditing ? 'Update the row for' : 'Add a new row with'} deviceId: ${deviceData.deviceId}
 3. Set the following values:
@@ -226,39 +227,6 @@ The device will pick up the new configuration within a few minutes.`);
             this.showError(`Failed to ${action.slice(0, -1)} device: ${error.message}`);
         }
     }
-    async handleAddDevice() {
-        const formData = new FormData(document.getElementById('addDeviceForm'));
-        const deviceData = {
-            deviceId: formData.get('deviceId'),
-            location: formData.get('location'),
-            template: formData.get('template'),
-            theme: formData.get('theme'),
-            slideId: formData.get('slideId'),
-            refreshInterval: parseInt(formData.get('refreshInterval'))
-        };
-
-        try {
-            const response = await fetch('/api/admin/devices', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(deviceData)
-            });
-
-            if (response.ok) {
-                this.hideAddDeviceModal();
-                await this.loadDevices();
-                this.showSuccess(`Device "${deviceData.deviceId}" added successfully`);
-            } else {
-                const error = await response.json();
-                throw new Error(error.message || 'Failed to add device');
-            }
-        } catch (error) {
-            console.error('Error adding device:', error);
-            this.showError(`Failed to add device: ${error.message}`);
-        }
-    }
 
     // Preview device (open in new tab)
     previewDevice(deviceId) {
@@ -266,18 +234,36 @@ The device will pick up the new configuration within a few minutes.`);
         window.open(url, '_blank', 'width=1024,height=768');
     }
 
-    // Edit device (placeholder - could open edit modal)
+    // Edit device - now with a proper implementation
     editDevice(deviceId) {
         const device = this.devices.find(d => d.deviceId === deviceId);
         if (device) {
-            // For now, just show an alert - could implement edit modal later
-            alert(`Edit functionality for ${deviceId} coming soon!\n\nCurrent settings:\n- Location: ${device.location}\n- Template: ${device.template}\n- Theme: ${device.theme}`);
+            // Pre-populate the add device form with current values
+            document.getElementById('deviceId').value = device.deviceId;
+            document.getElementById('location').value = device.location || '';
+            document.getElementById('template').value = device.template || 'standard';
+            document.getElementById('theme').value = device.theme || 'default';
+            document.getElementById('slideId').value = device.slideId || '';
+            document.getElementById('refreshInterval').value = device.refreshInterval || 15;
+
+            // Change the form title and button text
+            document.querySelector('.modal-header h3').textContent = `Edit Device: ${deviceId}`;
+            document.querySelector('button[type="submit"]').textContent = 'Update Device';
+
+            // Disable deviceId field since we're editing
+            document.getElementById('deviceId').disabled = true;
+
+            // Store the fact that we're editing
+            this.editingDevice = deviceId;
+
+            // Show the modal
+            this.showAddDeviceModal();
         }
     }
 
     // Delete device
     async deleteDevice(deviceId) {
-        if (!confirm(`Are you sure you want to delete device "${deviceId}"?\n\nThis action cannot be undone.`)) {
+        if (!confirm(`Are you sure you want to delete device "${deviceId}"?\n\nThis will require manual removal from the Google Sheet.`)) {
             return;
         }
 
@@ -287,8 +273,23 @@ The device will pick up the new configuration within a few minutes.`);
             });
 
             if (response.ok) {
-                await this.loadDevices();
-                this.showSuccess(`Device "${deviceId}" deleted successfully`);
+                const result = await response.json();
+
+                if (result.requiresManualUpdate) {
+                    this.showSuccess(`Device "${deviceId}" marked for deletion!
+
+Please remove this device from your Google Sheet manually:
+1. Open: https://docs.google.com/spreadsheets/d/1Zmzmg_QXsrPXvB6BR-j9lEExzTZ8sCHBneBJq90dlw0
+2. Find the row with deviceId: ${deviceId}
+3. Delete that entire row
+
+The device will stop receiving configuration once removed from the sheet.`);
+                } else {
+                    this.showSuccess(result.message);
+                }
+
+                // Don't refresh automatically since it's manual - just show instructions
+                console.log('Device marked for deletion - manual removal required');
             } else {
                 const error = await response.json();
                 throw new Error(error.message || 'Failed to delete device');
@@ -328,7 +329,7 @@ The device will pick up the new configuration within a few minutes.`);
         this.showNotification(message, 'error');
     }
 
-        showNotification(message, type = 'info') {
+    showNotification(message, type = 'info') {
         // Create notification element
         const notification = document.createElement('div');
         notification.className = `notification notification-${type}`;
