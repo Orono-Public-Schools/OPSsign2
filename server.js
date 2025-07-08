@@ -5,10 +5,14 @@ const session = require('express-session');
 const axios = require('axios');
 const { google } = require('googleapis');
 const path = require('path');
+const ping = require('ping');
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+const deviceStatuses = new Map();
+const deviceIPs = new Map();
 
 // Middleware
 app.use(express.json());
@@ -177,20 +181,21 @@ async function addDeviceToSheet(deviceData) {
 
   // Prepare the row data in the correct order
   const rowData = [
-    deviceData.deviceId,
-    deviceData.location || '',
-    deviceData.template || 'standard',
-    deviceData.theme || 'default',
-    deviceData.slideId || '',
-    deviceData.refreshInterval || 15,
-    deviceData.coordinates || '',
-    deviceData.notes || ''
+    deviceData.deviceId,              // Column A
+    deviceData.ipAddress || '',       // Column B
+    deviceData.location || '',        // Column C
+    deviceData.template || 'standard', // Column D
+    deviceData.theme || 'default',    // Column E
+    deviceData.slideId || '',         // Column F 
+    deviceData.refreshInterval || 15, // Column G 
+    deviceData.coordinates || '',     // Column H
+    deviceData.notes || ''           // Column I
   ];
 
   // Add the new row
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${nextRow}:H${nextRow}`,
+    range: `${sheetName}!A${nextRow}:I${nextRow}`,
     valueInputOption: 'RAW',
     resource: {
       values: [rowData]
@@ -232,21 +237,23 @@ async function updateDeviceInSheet(deviceId, deviceData) {
   }
 
   // Prepare the updated row data
+
   const rowData = [
-    deviceData.deviceId,
-    deviceData.location || '',
-    deviceData.template || 'standard',
-    deviceData.theme || 'default',
-    deviceData.slideId || '',
-    deviceData.refreshInterval || 15,
-    deviceData.coordinates || '',
-    deviceData.notes || ''
+    deviceData.deviceId,              // Column A
+    deviceData.ipAddress || '',       // Column B
+    deviceData.location || '',        // Column C
+    deviceData.template || 'standard', // Column D
+    deviceData.theme || 'default',    // Column E
+    deviceData.slideId || '',         // Column F
+    deviceData.refreshInterval || 15, // Column G
+    deviceData.coordinates || '',     // Column H
+    deviceData.notes || ''           // Column I
   ];
 
   // Update the row
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${targetRow}:H${targetRow}`,
+    range: `${sheetName}!A${targetRow}:I${targetRow}`,
     valueInputOption: 'RAW',
     resource: {
       values: [rowData]
@@ -290,7 +297,7 @@ async function deleteDeviceFromSheet(deviceId) {
   // Delete the row
   const request = {
     spreadsheetId: sheetId,
-    resource: {
+ 	   resource: {
       requests: [{
         deleteDimension: {
           range: {
@@ -308,6 +315,66 @@ async function deleteDeviceFromSheet(deviceId) {
   return response;
 }
 
+
+// Ping monitoring functions
+async function checkDeviceStatus(deviceId, ipAddress) {
+  try {
+    const result = await ping.promise.probe(ipAddress, {
+      timeout: 3,
+      extra: ['-c', '1'] // Send only 1 packet
+    });
+
+    return {
+      deviceId,
+      status: result.alive ? 'online' : 'offline',
+      responseTime: result.time,
+      lastChecked: new Date().toISOString(),
+      ipAddress
+    };
+  } catch (error) {
+    return {
+      deviceId,
+      status: 'offline',
+      error: error.message,
+      lastChecked: new Date().toISOString(),
+      ipAddress
+    };
+  }
+}
+
+async function pingAllDevices() {
+  console.log(`🏓 Pinging ${deviceIPs.size} devices...`);
+
+  for (const [deviceId, ipAddress] of deviceIPs) {
+    if (ipAddress && ipAddress !== '') {
+      const status = await checkDeviceStatus(deviceId, ipAddress);
+      deviceStatuses.set(deviceId, status);
+      console.log(`📡 ${deviceId} (${ipAddress}): ${status.status}`);
+    }
+  }
+}
+
+// Function to update device IP mapping from Google Sheets
+async function updateDeviceIPs() {
+  try {
+    const rows = await fetchGoogleSheet();
+    const devices = parseSheetData(rows);
+
+    // Clear and rebuild IP mapping
+    deviceIPs.clear();
+
+    devices.forEach(device => {
+      if (device.deviceId && device.ipAddress) {
+        deviceIPs.set(device.deviceId, device.ipAddress);
+      }
+    });
+
+    console.log(`📋 Updated IP mapping for ${deviceIPs.size} devices`);
+  } catch (error) {
+    console.error('Error updating device IPs:', error);
+  }
+}
+
 function parseSheetData(rows) {
   if (rows.length === 0) return [];
 
@@ -322,9 +389,11 @@ function parseSheetData(rows) {
       device[header] = row[index] || '';
     });
 
-    // Add status (we'll assume online for now, could be enhanced later)
-    device.status = 'online';
-    device.lastSeen = new Date().toISOString();
+    // Get status from ping monitoring
+    const pingStatus = deviceStatuses.get(device.deviceId);
+    device.status = pingStatus ? pingStatus.status : 'unknown';
+    device.lastSeen = pingStatus ? pingStatus.lastChecked : 'Never';
+    device.responseTime = pingStatus ? pingStatus.responseTime : null;
 
     data.push(device);
   }
@@ -684,7 +753,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Start server
 app.listen(port, '0.0.0.0', async () => {
   console.log(`🚀 OPSsign2 server running on port ${port}`);
   console.log(`📱 Digital signage: http://sign.orono.k12.mn.us:${port}`);
@@ -694,6 +762,17 @@ app.listen(port, '0.0.0.0', async () => {
 
   // Initialize Google Sheets API
   await initializeGoogleSheets();
+
+  // Initialize ping monitoring
+  console.log(`🏓 Starting ping monitoring...`);
+  await updateDeviceIPs();
+  await pingAllDevices();
+
+  // Check devices every 2 minutes
+  setInterval(async () => {
+    await updateDeviceIPs(); // Refresh IP list from Google Sheets
+    await pingAllDevices();  // Ping all devices
+  }, 120000); // 2 minutes
 });
 
 module.exports = app;

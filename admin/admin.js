@@ -61,7 +61,10 @@ class AdminInterface {
                         ${device.status === 'online' ? '🟢' : '🔴'} ${device.status}
                     </span>
                 </div>
-
+                <div class="device-detail">
+                    <span class="device-detail-label">IP Address:</span>
+                    <span class="device-detail-value">${device.ipAddress || 'Not set'}</span>
+                </div>
                 <div class="device-details">
                     <div class="device-detail">
                         <span class="device-detail-label">Location:</span>
@@ -169,6 +172,7 @@ class AdminInterface {
         const formData = new FormData(document.getElementById('addDeviceForm'));
         const deviceData = {
             deviceId: formData.get('deviceId'),
+            ipAddress: formData.get('ipAddress'),
             location: formData.get('location'),
             template: formData.get('template'),
             theme: formData.get('theme'),

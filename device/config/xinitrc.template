@@ -1,0 +1,4 @@
+#!/bin/bash
+# .xinitrc for OPSsign2 kiosk
+
+exec /opt/opssign/scripts/start-kiosk.sh

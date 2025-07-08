@@ -88,8 +88,11 @@
                 }
             }
 
+            // Updated applyConfiguration method for public/index.html
+            // Replace the existing applyConfiguration method with this version
+
             async applyConfiguration() {
-                try {
+                 try {
                     // Load template if specified
                     if (this.config.template && this.config.template !== 'standard') {
                         await this.loadTemplate(this.config.template);
@@ -100,11 +103,20 @@
                         this.loadTheme(this.config.theme);
                     }
 
-                    // Initialize Google Slide
+                    // Initialize Google Slide if available
                     if (this.config.slideId) {
                         this.initializeSlide(this.config.slideId);
                     } else {
-                        this.showError('No Google Slide ID configured for this device');
+                        // Let the template handle the no-slideId case
+                        console.log('No slideId configured - using template default content');
+
+                        // For standard template, we still want to show an error
+                        if (!this.config.template || this.config.template === 'standard') {
+                            this.showError('No Google Slide ID configured for this device');
+                        } else {
+                            // For custom templates, let them show their default content
+                            console.log(`Template "${this.config.template}" will show default content`);
+                        }
                     }
 
                     // Update footer information
