@@ -19,31 +19,41 @@ xset s noblank
 # Hide cursor after 5 seconds
 unclutter -idle 5 &
 
-# Launch chromium in kiosk mode
+# Clean chromium config to remove any windowed preferences
+rm -rf /home/opssign/.config/chromium 2>/dev/null || true
+
+# Create a fresh chromium config directory
+mkdir -p /home/opssign/.config/chromium/Default
+
+# Create preferences file that forces fullscreen
+cat > /home/opssign/.config/chromium/Default/Preferences << 'EOF'
+{
+   "browser": {
+      "window_placement": {
+         "bottom": 1080,
+         "left": 0,
+         "maximized": true,
+         "right": 1920,
+         "top": 0,
+         "work_area_bottom": 1080,
+         "work_area_left": 0,
+         "work_area_right": 1920,
+         "work_area_top": 0
+      }
+   }
+}
+EOF
+
+# Launch chromium with simplified but effective flags
 exec chromium-browser \
     --kiosk \
-    --start-fullscreen \
-    --force-device-scale-factor=1 \
-    --disable-features=VizDisplayCompositor \
     --no-sandbox \
     --disable-infobars \
     --disable-dev-tools \
     --disable-extensions \
-    --disable-plugins \
-    --disable-java \
-    --disable-translate \
-    --disable-web-security \
-    --disable-features=TranslateUI \
-    --disable-sync \
-    --disable-default-apps \
     --no-first-run \
-    --hide-scrollbars \
-    --disable-pinch \
-    --overscroll-history-navigation=0 \
-    --disable-background-timer-throttling \
-    --disable-backgrounding-occluded-windows \
-    --disable-renderer-backgrounding \
-    --autoplay-policy=no-user-gesture-required \
+    --disable-translate \
+    --disable-features=TranslateUI \
     --user-data-dir=/home/opssign/.config/chromium \
-    --app="${SERVER_URL}/?deviceId=${DEVICE_ID}" \
+    "${SERVER_URL}/?deviceId=${DEVICE_ID}" \
     2>&1 | tee -a /var/log/opssign-kiosk.log
