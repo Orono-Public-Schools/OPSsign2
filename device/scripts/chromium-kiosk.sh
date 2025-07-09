@@ -23,6 +23,8 @@ unclutter -idle 5 &
 exec chromium-browser \
     --kiosk \
     --start-fullscreen \
+    --force-device-scale-factor=1 \
+    --disable-features=VizDisplayCompositor \
     --no-sandbox \
     --disable-infobars \
     --disable-dev-tools \
@@ -43,5 +45,5 @@ exec chromium-browser \
     --disable-renderer-backgrounding \
     --autoplay-policy=no-user-gesture-required \
     --user-data-dir=/home/opssign/.config/chromium \
-    "${SERVER_URL}/?deviceId=${DEVICE_ID}" \
+    --app="${SERVER_URL}/?deviceId=${DEVICE_ID}" \
     2>&1 | tee -a /var/log/opssign-kiosk.log
