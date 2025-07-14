@@ -158,7 +158,7 @@ async function initializeGoogleSheets() {
 async function fetchGoogleSheet() {
   const apiKey = process.env.GOOGLE_API_KEY;
   const sheetId = process.env.GOOGLE_SHEET_ID;
-  const sheetName = 'Sheet1';
+  const sheetName = 'Displays';  // Keep this for now
 
   const response = await axios.get(
     `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${sheetName}?key=${apiKey}`
@@ -173,13 +173,13 @@ async function addDeviceToSheet(deviceData) {
   }
 
   const sheetId = process.env.GOOGLE_SHEET_ID;
-  const sheetName = 'Sheet1';
+  const sheetName = 'Displays';  // Keep this for now
 
   // First, get current data to determine the next row
   const currentData = await fetchGoogleSheet();
   const nextRow = currentData.length + 1;
 
-  // Prepare the row data in the correct order
+  // Prepare the row data in the correct order - UPDATED to include building
   const rowData = [
     deviceData.deviceId,              // Column A
     deviceData.ipAddress || '',       // Column B
@@ -189,13 +189,14 @@ async function addDeviceToSheet(deviceData) {
     deviceData.slideId || '',         // Column F 
     deviceData.refreshInterval || 15, // Column G 
     deviceData.coordinates || '',     // Column H
-    deviceData.notes || ''           // Column I
+    deviceData.notes || '',           // Column I
+    deviceData.building || ''         // Column J - NEW!
   ];
 
-  // Add the new row
+  // Add the new row - UPDATED range to include Column J
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${nextRow}:I${nextRow}`,
+    range: `${sheetName}!A${nextRow}:J${nextRow}`, // Changed from I to J
     valueInputOption: 'RAW',
     resource: {
       values: [rowData]
@@ -212,7 +213,7 @@ async function updateDeviceInSheet(deviceId, deviceData) {
   }
 
   const sheetId = process.env.GOOGLE_SHEET_ID;
-  const sheetName = 'Sheet1';
+  const sheetName = 'Displays';  // Keep this for now
 
   // Get current data to find the row to update
   const currentData = await fetchGoogleSheet();
@@ -236,8 +237,7 @@ async function updateDeviceInSheet(deviceId, deviceData) {
     throw new Error(`Device ${deviceId} not found in sheet`);
   }
 
-  // Prepare the updated row data
-
+  // Prepare the updated row data - UPDATED to include building
   const rowData = [
     deviceData.deviceId,              // Column A
     deviceData.ipAddress || '',       // Column B
@@ -247,13 +247,14 @@ async function updateDeviceInSheet(deviceId, deviceData) {
     deviceData.slideId || '',         // Column F
     deviceData.refreshInterval || 15, // Column G
     deviceData.coordinates || '',     // Column H
-    deviceData.notes || ''           // Column I
+    deviceData.notes || '',           // Column I
+    deviceData.building || ''         // Column J - NEW!
   ];
 
-  // Update the row
+  // Update the row - UPDATED range to include Column J
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${targetRow}:I${targetRow}`,
+    range: `${sheetName}!A${targetRow}:J${targetRow}`, // Changed from I to J
     valueInputOption: 'RAW',
     resource: {
       values: [rowData]
@@ -270,7 +271,7 @@ async function deleteDeviceFromSheet(deviceId) {
   }
 
   const sheetId = process.env.GOOGLE_SHEET_ID;
-  const sheetName = 'Sheet1';
+  const sheetName = 'Displays';
 
   // Get current data to find the row to delete
   const currentData = await fetchGoogleSheet();
