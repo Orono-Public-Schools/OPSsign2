@@ -255,20 +255,116 @@ exec chromium-browser \
 - `public/index.html` - Updated template loading logic
 - `admin/index.html` - Added new template options, updated counts
 
-## 8. Next Steps / Future Enhancements
+## 8. Alert Management System
+
+### Complete Alert System Implementation
+**Google Sheets Structure**:
+- **Sheet 1**: "Displays" (includes building column: SE, IS, MS, HS, DC, DO)
+- **Sheet 2**: "Alerts" (alertId, name, slideId, buildings, priority, active, expires)
+
+**Building Codes Used**:
+- **SE**: Schumann Elementary
+- **IS**: Intermediate School  
+- **MS**: Middle School
+- **HS**: High School
+- **DC**: Discovery Center
+- **DO**: District Office
+
+### Alert System Features
+**Admin Interface**:
+- Alert creation with building selection checkboxes
+- Quick select buttons (All Schools, Elementary Level, Secondary Level, etc.)
+- Priority levels (High/Medium/Low) with color coding
+- Active/inactive toggle functionality
+- Expiration date support
+- Edit/delete alert management
+
+**Display Logic**:
+- Alerts override regular presentations when active
+- Building-based targeting (devices only show alerts for their building)
+- Priority-based display (highest priority alert wins)
+- Visual alert banners with priority-specific styling:
+  - High Priority: Red banner with pulse animation
+  - Medium Priority: Orange banner
+  - Low Priority: Blue banner
+
+**Server API Endpoints**:
+```javascript
+GET /api/admin/alerts          // List all alerts
+POST /api/admin/alerts         // Create new alert
+PUT /api/admin/alerts/:id      // Update alert
+DELETE /api/admin/alerts/:id   // Delete alert
+PATCH /api/admin/alerts/:id/toggle // Toggle active status
+```
+
+### Files Modified for Alert System
+**Backend Updates**:
+- `server.js`: Added alert management functions and API endpoints
+  - `fetchAlertsSheet()`, `parseAlertsData()`, `getAlertsForBuilding()`
+  - `addAlertToSheet()`, `updateAlertInSheet()`, `deleteAlertFromSheet()`
+  - Updated device config API to include building-filtered alerts
+
+**Frontend Updates**:
+- `admin/index.html`: Added complete alert management interface
+  - Alert statistics display
+  - Alert creation form with building selection
+  - Alerts display grid with priority indicators
+  - Edit alert modal
+
+- `admin/admin.js`: Extended AdminInterface class with alert methods
+  - Alert CRUD operations
+  - Building selection helpers
+  - Alert display and statistics management
+
+- `admin/admin.css`: Added alert-specific styling
+  - Priority-based color coding
+  - Building selection interface
+  - Alert card styling matching device cards
+  - Responsive design for mobile devices
+
+- `public/index.html`: Updated applyConfiguration() method
+  - Alert detection logic
+  - Priority-based alert selection
+  - Alert banner display functionality
+
+- `public/style.css`: Added alert banner styles
+  - Priority-specific color schemes
+  - Animation effects for high-priority alerts
+  - Responsive alert banner design
+
+### Alert Workflow
+1. **Admin creates alert** in web interface
+2. **Alert saved** to Google Sheets (Alerts sheet)
+3. **Devices request configuration** from server
+4. **Server filters alerts** by device building
+5. **Device displays alert slideId** instead of regular presentation
+6. **Alert banner shown** with priority-specific styling
+7. **Automatic fallback** to regular content when alert expires/deactivated
+
+### Production-Ready Features
+✅ **Emergency Communications**: Weather delays, lockdowns, safety notices
+✅ **Operational Updates**: Menu changes, event announcements, schedule updates  
+✅ **Targeted Messaging**: Building-specific or district-wide alerts
+✅ **Priority Management**: Critical alerts override lower-priority content
+✅ **Easy Administration**: Point-and-click alert management interface
+✅ **Real-time Deployment**: Instant alert activation across all targeted displays
+
+## 9. Next Steps / Future Enhancements
 
 ### Potential Template Ideas
-- **Emergency Template**: High-contrast, attention-grabbing design
+- **Emergency Template**: High-contrast, attention-grabbing design for critical alerts
 - **Menu Template**: Food service menu display
 - **Event Template**: Upcoming events and calendar
 - **Directory Template**: Staff directory and locations
 - **Sports Template**: Game schedules and scores
 
 ### System Enhancements
-- **Health Monitoring**: Device status reporting
+- **Scheduled Alerts**: Time-based alert activation/deactivation
+- **Alert Templates**: Pre-defined alert types for common scenarios
+- **Health Monitoring**: Device status reporting with alerts
 - **Remote Reboot**: Restart devices from admin interface
 - **Screenshot Capture**: See what devices are displaying
 - **Bandwidth Monitoring**: Track data usage
-- **Scheduled Content**: Time-based template switching
+- **Alert History**: Log of all alert activations for audit trail
 
-This completes the major enhancements to the OPSsign2 digital signage system, providing a robust, scalable, and maintainable solution for Orono Public Schools.
+This completes the major enhancements to the OPSsign2 digital signage system, providing a robust, scalable, and maintainable solution for Orono Public Schools with comprehensive alert management capabilities.

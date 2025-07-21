@@ -88,11 +88,12 @@
                 }
             }
 
-            // Updated applyConfiguration method for public/index.html
-            // Replace the existing applyConfiguration method with this version
+            // REPLACE the existing applyConfiguration method in public/index.html with this version:
 
             async applyConfiguration() {
-                 try {
+                try {
+                    console.log('Applying configuration:', this.config);
+
                     // Load template if specified
                     if (this.config.template && this.config.template !== 'standard') {
                         await this.loadTemplate(this.config.template);
@@ -103,10 +104,19 @@
                         this.loadTheme(this.config.theme);
                     }
 
-                    // Initialize Google Slide if available
-                    if (this.config.slideId) {
+                    // NEW: Check for active alerts first
+                    const activeAlert = this.getHighestPriorityAlert();
+
+                    if (activeAlert) {
+                        console.log(`🚨 Showing alert: ${activeAlert.name} (Priority: ${activeAlert.priority}) for building: ${this.config.building}`);
+                        this.showAlertIndicator(activeAlert);
+                        this.initializeSlide(activeAlert.slideId);
+                    } else if (this.config.slideId) {
+                        console.log('No alerts active, showing regular presentation');
+                        this.hideAlertIndicator();
                         this.initializeSlide(this.config.slideId);
                     } else {
+                        this.hideAlertIndicator();
                         // Let the template handle the no-slideId case
                         console.log('No slideId configured - using template default content');
 
@@ -126,6 +136,70 @@
                     console.error('Error applying configuration:', error);
                     this.showError(`Configuration Error: ${error.message}`);
                 }
+            }
+
+            // ADD these new methods to the DigitalSignage class (after the applyConfiguration method):
+
+            getHighestPriorityAlert() {
+                if (!this.config.alerts || this.config.alerts.length === 0) {
+                    console.log('No alerts found in configuration');
+                    return null;
+                }
+
+                console.log(`Found ${this.config.alerts.length} alerts:`, this.config.alerts);
+
+                // Sort alerts by priority: high > medium > low
+                const priorityValues = { high: 3, medium: 2, low: 1 };
+                const sortedAlerts = this.config.alerts.sort((a, b) => {
+                    return (priorityValues[b.priority] || 1) - (priorityValues[a.priority] || 1);
+                });
+
+                const topAlert = sortedAlerts[0];
+                console.log('Highest priority alert:', topAlert);
+                return topAlert;
+            }
+
+            showAlertIndicator(alert) {
+                console.log('Showing alert indicator for:', alert.name);
+
+                // Create or update alert banner
+                let alertBanner = document.getElementById('alertBanner');
+                if (!alertBanner) {
+                    alertBanner = document.createElement('div');
+                    alertBanner.id = 'alertBanner';
+                    alertBanner.className = 'alert-banner';
+
+                    // Insert at the top of the body
+                    document.body.insertBefore(alertBanner, document.body.firstChild);
+                }
+
+                alertBanner.style.display = 'block';
+                alertBanner.innerHTML = `
+        <div class="alert-content">
+            <span class="alert-icon">🚨</span>
+            <span class="alert-text">${alert.name}</span>
+            <span class="alert-priority priority-${alert.priority}">${alert.priority.toUpperCase()}</span>
+        </div>
+    `;
+                alertBanner.className = `alert-banner priority-${alert.priority}`;
+
+                // Add pulsing animation for high priority alerts
+                if (alert.priority === 'high') {
+                    alertBanner.classList.add('alert-pulse');
+                }
+
+                // Adjust body padding to account for alert banner
+                document.body.style.paddingTop = '60px';
+            }
+
+            hideAlertIndicator() {
+                const alertBanner = document.getElementById('alertBanner');
+                if (alertBanner) {
+                    alertBanner.style.display = 'none';
+                }
+
+                // Remove body padding
+                document.body.style.paddingTop = '0';
             }
 
             async loadTemplate(templateName) {

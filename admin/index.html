@@ -92,6 +92,132 @@
                 </div>
             </div>
         </section>
+
+        <!-- NEW: Alert Management Section -->
+        <section class="alerts-section">
+            <div class="section-header">
+                <h2>Alert Management</h2>
+                <div class="alert-stats">
+                    <span class="stat-item">
+                        <span class="stat-label">Total:</span>
+                        <span class="stat-number" id="totalAlerts">0</span>
+                    </span>
+                    <span class="stat-item">
+                        <span class="stat-label">Active:</span>
+                        <span class="stat-number active" id="activeAlerts">0</span>
+                    </span>
+                    <span class="stat-item">
+                        <span class="stat-label">High Priority:</span>
+                        <span class="stat-number priority-high" id="highPriorityAlerts">0</span>
+                    </span>
+                </div>
+            </div>
+
+            <!-- Add New Alert Form -->
+            <div class="alert-form-container">
+                <h3>Add New Alert</h3>
+                <form id="alertForm" class="alert-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="alertName">Alert Name</label>
+                            <input type="text" id="alertName" name="alertName" required 
+                                   placeholder="e.g., Weather Delay - 2 Hour Late Start">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="alertSlideId">Google Slides ID</label>
+                            <input type="text" id="alertSlideId" name="alertSlideId" required 
+                                   placeholder="Google Slides ID for this alert">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="alertPriority">Priority Level</label>
+                            <select id="alertPriority" name="alertPriority" required>
+                                <option value="low">Low Priority</option>
+                                <option value="medium" selected>Medium Priority</option>
+                                <option value="high">High Priority</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="alertExpires">Expiration (Optional)</label>
+                            <input type="datetime-local" id="alertExpires" name="alertExpires">
+                        </div>
+                    </div>
+
+                    <!-- Building Selection -->
+                    <div class="form-group building-selection">
+                        <label>Target Buildings</label>
+                        
+                        <!-- Quick Select Buttons -->
+                        <div class="quick-select-buttons">
+                            <button type="button" onclick="selectAllSchools()">All Schools</button>
+                            <button type="button" onclick="selectElementaryLevel()">Elementary Level</button>
+                            <button type="button" onclick="selectSecondaryLevel()">Secondary Level</button>
+                            <button type="button" onclick="selectAllBuildings()">All Buildings</button>
+                            <button type="button" onclick="clearAllBuildings()">Clear All</button>
+                        </div>
+                        
+                        <!-- Building Checkboxes -->
+                        <div class="building-checkboxes">
+                            <label class="checkbox-label">
+                                <input type="checkbox" value="SE" name="buildings">
+                                <span class="building-code">SE</span> - Schumann Elementary
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" value="IS" name="buildings">
+                                <span class="building-code">IS</span> - Intermediate School
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" value="MS" name="buildings">
+                                <span class="building-code">MS</span> - Middle School
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" value="HS" name="buildings">
+                                <span class="building-code">HS</span> - High School
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" value="DC" name="buildings">
+                                <span class="building-code">DC</span> - Discovery Center
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" value="DO" name="buildings">
+                                <span class="building-code">DO</span> - District Office
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Add Alert</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Alerts Table -->
+            <div class="alerts-table-container">
+                <div class="table-header">
+                    <h3>Current Alerts</h3>
+                    <div class="table-controls">
+                        <button onclick="refreshAlerts()" class="btn btn-secondary">
+                            <span id="refreshAlertsText">Refresh</span>
+                        </button>
+                        <select id="alertFilter" onchange="filterAlerts()">
+                            <option value="all">All Alerts</option>
+                            <option value="active">Active Only</option>
+                            <option value="high">High Priority</option>
+                            <option value="medium">Medium Priority</option>
+                            <option value="low">Low Priority</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="alerts-grid" id="alertsGrid">
+                    <div class="loading" id="alertsLoading">Loading alerts...</div>
+                </div>
+            </div>
+        </section>
     </main>
 
     <!-- Add Device Modal -->
@@ -117,6 +243,19 @@
                     <label for="location">Location</label>
                     <input type="text" id="location" name="location" required
                            placeholder="e.g., Main Lobby, Cafeteria">
+                </div>
+                <!-- NEW: Building field -->
+                <div class="form-group">
+                    <label for="building">Building</label>
+                    <select id="building" name="building" required>
+                        <option value="">Select Building</option>
+                        <option value="SE">SE - Schumann Elementary</option>
+                        <option value="IS">IS - Intermediate School</option>
+                        <option value="MS">MS - Middle School</option>
+                        <option value="HS">HS - High School</option>
+                        <option value="DC">DC - Discovery Center</option>
+                        <option value="DO">DO - District Office</option>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label for="template">Template</label>
@@ -148,6 +287,81 @@
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" id="cancelAdd">Cancel</button>
                     <button type="submit" class="btn btn-primary">Add Device</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Alert Edit Modal -->
+    <div id="alertEditModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Edit Alert</h3>
+                <span class="modal-close" onclick="closeAlertEditModal()">&times;</span>
+            </div>
+            <form id="alertEditForm">
+                <input type="hidden" id="editAlertId">
+                
+                <div class="form-group">
+                    <label for="editAlertName">Alert Name</label>
+                    <input type="text" id="editAlertName" name="alertName" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editAlertSlideId">Google Slides ID</label>
+                    <input type="text" id="editAlertSlideId" name="alertSlideId" required>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="editAlertPriority">Priority</label>
+                        <select id="editAlertPriority" name="alertPriority">
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="editAlertExpires">Expires</label>
+                        <input type="datetime-local" id="editAlertExpires" name="alertExpires">
+                    </div>
+                </div>
+                
+                <!-- Edit Building Selection -->
+                <div class="form-group building-selection">
+                    <label>Target Buildings</label>
+                    <div class="building-checkboxes" id="editBuildingCheckboxes">
+                        <label class="checkbox-label">
+                            <input type="checkbox" value="SE" name="editBuildings">
+                            <span class="building-code">SE</span> - Schumann Elementary
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" value="IS" name="editBuildings">
+                            <span class="building-code">IS</span> - Intermediate School
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" value="MS" name="editBuildings">
+                            <span class="building-code">MS</span> - Middle School
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" value="HS" name="editBuildings">
+                            <span class="building-code">HS</span> - High School
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" value="DC" name="editBuildings">
+                            <span class="building-code">DC</span> - Discovery Center
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" value="DO" name="editBuildings">
+                            <span class="building-code">DO</span> - District Office
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" onclick="closeAlertEditModal()" class="btn btn-secondary">Cancel</button>
+                    <button type="button" onclick="saveAlertEdit()" class="btn btn-primary">Save Changes</button>
                 </div>
             </form>
         </div>

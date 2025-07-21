@@ -447,3 +447,385 @@ form {
         grid-template-columns: repeat(2, 1fr);
     }
 }
+
+/* ===== ALERT MANAGEMENT STYLES ===== */
+/* Add these styles to your existing admin.css file */
+
+/* Alerts Section - matches your devices-section pattern */
+.alerts-section {
+    margin-bottom: 3rem;
+}
+
+/* Alert Statistics in Header - matches your existing stat styling */
+.alert-stats {
+    display: flex;
+    gap: 1.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.stat-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.stat-item .stat-label {
+    color: #718096;
+    font-weight: 500;
+}
+
+.stat-item .stat-number {
+    font-weight: bold;
+    font-size: 1.1rem;
+    color: #2d3748;
+}
+
+.stat-item .stat-number.active {
+    color: #38a169;
+}
+
+.stat-item .stat-number.priority-high {
+    color: #e53e3e;
+}
+
+/* Alert Form Container - matches your modal/form styling */
+.alert-form-container {
+    background: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    margin-bottom: 2rem;
+}
+
+.alert-form-container h3 {
+    margin: 0 0 1.5rem 0;
+    color: #2d3748;
+    font-size: 1.2rem;
+}
+
+.alert-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+/* Form row - two columns like your existing forms */
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+/* Building Selection - styled like your form elements */
+.building-selection {
+    border: 1px solid #d1d5db;
+    padding: 1rem;
+    border-radius: 4px;
+    background: #f9fafb;
+    margin-top: 0.5rem;
+}
+
+.building-selection > label {
+    display: block;
+    margin-bottom: 0.75rem;
+    font-weight: 500;
+    color: #4a5568;
+}
+
+/* Quick Select Buttons - matches your btn styling */
+.quick-select-buttons {
+    margin-bottom: 1rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.quick-select-buttons button {
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+    background: #e2e8f0;
+    color: #4a5568;
+    border: 1px solid #cbd5e0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: 500;
+}
+
+.quick-select-buttons button:hover {
+    background: #cbd5e0;
+    transform: translateY(-1px);
+}
+
+/* Building Checkboxes Grid */
+.building-checkboxes {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    padding: 0.375rem;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    color: #4a5568;
+}
+
+.checkbox-label:hover {
+    background: rgba(102, 126, 234, 0.05);
+}
+
+.building-code {
+    font-weight: 600;
+    color: #667eea;
+    min-width: 24px;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+}
+
+/* Alerts Table Container */
+.alerts-table-container {
+    margin-top: 2rem;
+}
+
+.table-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.table-header h3 {
+    margin: 0;
+    color: #2d3748;
+    font-size: 1.2rem;
+}
+
+.table-controls {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.table-controls select {
+    padding: 0.5rem;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: white;
+    font-size: 0.9rem;
+    color: #4a5568;
+}
+
+.table-controls select:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+/* Alerts Grid - matches your devices-grid pattern */
+.alerts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 1.5rem;
+}
+
+/* Alert Cards - matches your device-card styling */
+.alert-card {
+    background: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
+}
+
+.alert-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+/* Priority left border - subtle but clear */
+.alert-card.priority-high {
+    border-left: 4px solid #e53e3e;
+}
+
+.alert-card.priority-medium {
+    border-left: 4px solid #ed8936;
+}
+
+.alert-card.priority-low {
+    border-left: 4px solid #667eea;
+}
+
+/* Alert Header - matches device-header */
+.alert-header {
+    margin-bottom: 1rem;
+}
+
+.alert-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #2d3748;
+    margin: 0 0 0.75rem 0;
+    line-height: 1.4;
+}
+
+.alert-status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Priority Badges - matches your device-status styling */
+.priority-badge {
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+}
+
+.priority-badge.high {
+    background: #fed7d7;
+    color: #742a2a;
+}
+
+.priority-badge.medium {
+    background: #feebc8;
+    color: #7b341e;
+}
+
+.priority-badge.low {
+    background: #e6fffa;
+    color: #2c7a7b;
+}
+
+/* Alert Status - matches device-status */
+.alert-status {
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.alert-status.active {
+    background: #c6f6d5;
+    color: #22543d;
+}
+
+.alert-status.inactive {
+    background: #e2e8f0;
+    color: #4a5568;
+}
+
+/* Alert Details - matches device-details */
+.alert-details {
+    margin-bottom: 1.5rem;
+}
+
+.alert-detail {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+    align-items: flex-start;
+}
+
+.alert-detail-label {
+    color: #718096;
+    flex-shrink: 0;
+    margin-right: 1rem;
+}
+
+.alert-detail-value {
+    color: #2d3748;
+    font-weight: 500;
+    text-align: right;
+    word-break: break-word;
+}
+
+/* Alert Actions - matches device-actions */
+.alert-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Modal Enhancements - extends your existing modal styles */
+#alertEditModal .modal-content {
+    max-width: 600px;
+    width: 90%;
+}
+
+/* Edit Building Checkboxes Container */
+#editBuildingCheckboxes {
+    border: 1px solid #d1d5db;
+    padding: 1rem;
+    border-radius: 4px;
+    background: #f9fafb;
+    margin-top: 0.5rem;
+}
+
+#editBuildingCheckboxes .building-checkboxes {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+}
+
+/* Responsive Design - matches your existing breakpoints */
+@media (max-width: 768px) {
+    .alerts-section .section-header {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: stretch;
+    }
+    
+    .alert-stats {
+        justify-content: space-between;
+        width: 100%;
+    }
+    
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .building-checkboxes,
+    #editBuildingCheckboxes .building-checkboxes {
+        grid-template-columns: 1fr;
+    }
+    
+    .quick-select-buttons {
+        justify-content: center;
+    }
+    
+    .table-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .alerts-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .alert-actions {
+        flex-direction: column;
+    }
+    
+    .alert-status-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+}

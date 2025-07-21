@@ -2,15 +2,19 @@
 class AdminInterface {
     constructor() {
         this.devices = [];
+        this.alerts = [];
         this.editingDevice = null;
+        this.editingAlert = null;
         this.init();
     }
 
     async init() {
         await this.loadUserInfo();
         await this.loadDevices();
+        await this.loadAlerts();
         this.setupEventListeners();
         this.updateStats();
+        this.updateAlertStats();
     }
 
     // Load current user information
@@ -44,6 +48,26 @@ class AdminInterface {
         }
     }
 
+    // Load alerts from the server
+    async loadAlerts() {
+        try {
+            const response = await fetch('/api/admin/alerts');
+            if (response.ok) {
+                this.alerts = await response.json();
+                this.renderAlerts();
+            } else {
+                // Alerts might not exist yet, that's okay
+                console.log('No alerts found or alerts sheet not created yet');
+                this.alerts = [];
+                this.renderAlerts();
+            }
+        } catch (error) {
+            console.error('Error loading alerts:', error);
+            this.alerts = [];
+            this.renderAlerts();
+        }
+    }
+
     // Render devices in the grid
     renderDevices() {
         const grid = document.getElementById('devicesGrid');
@@ -69,6 +93,10 @@ class AdminInterface {
                     <div class="device-detail">
                         <span class="device-detail-label">Location:</span>
                         <span class="device-detail-value">${device.location || 'Not set'}</span>
+                    </div>
+                    <div class="device-detail">
+                        <span class="device-detail-label">Building:</span>
+                        <span class="device-detail-value">${device.building || 'Not set'}</span>
                     </div>
                     <div class="device-detail">
                         <span class="device-detail-label">Template:</span>
@@ -103,7 +131,58 @@ class AdminInterface {
         `).join('');
     }
 
-    // Update statistics
+    // Render alerts in the grid
+    renderAlerts() {
+        const grid = document.getElementById('alertsGrid');
+
+        if (this.alerts.length === 0) {
+            grid.innerHTML = '<div class="loading">No alerts configured yet.</div>';
+            return;
+        }
+
+        grid.innerHTML = this.alerts.map(alert => `
+            <div class="alert-card priority-${alert.priority}" data-alert-id="${alert.alertId}">
+                <div class="alert-header">
+                    <h3 class="alert-title">${alert.name}</h3>
+                    <div class="alert-status-row">
+                        <span class="priority-badge ${alert.priority}">${alert.priority.toUpperCase()}</span>
+                        <span class="alert-status ${alert.active === 'TRUE' ? 'active' : 'inactive'}">
+                            ${alert.active === 'TRUE' ? '🟢 Active' : '⚪ Inactive'}
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="alert-details">
+                    <div class="alert-detail">
+                        <span class="alert-detail-label">Buildings:</span>
+                        <span class="alert-detail-value">${this.formatBuildingNames(alert.buildings)}</span>
+                    </div>
+                    <div class="alert-detail">
+                        <span class="alert-detail-label">Slide ID:</span>
+                        <span class="alert-detail-value">${alert.slideId}</span>
+                    </div>
+                    <div class="alert-detail">
+                        <span class="alert-detail-label">Expires:</span>
+                        <span class="alert-detail-value">${alert.expires ? this.formatDate(alert.expires) : 'Never'}</span>
+                    </div>
+                </div>
+
+                <div class="alert-actions">
+                    <button class="btn btn-secondary btn-small" onclick="admin.toggleAlert('${alert.alertId}')">
+                        ${alert.active === 'TRUE' ? '⏸️ Deactivate' : '▶️ Activate'}
+                    </button>
+                    <button class="btn btn-secondary btn-small" onclick="admin.editAlert('${alert.alertId}')">
+                        ✏️ Edit
+                    </button>
+                    <button class="btn btn-danger btn-small" onclick="admin.deleteAlert('${alert.alertId}')">
+                        🗑️ Delete
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // Update device statistics
     updateStats() {
         const total = this.devices.length;
         const online = this.devices.filter(d => d.status === 'online').length;
@@ -114,14 +193,24 @@ class AdminInterface {
         document.getElementById('offlineDevices').textContent = offline;
     }
 
+    // Update alert statistics
+    updateAlertStats() {
+        const total = this.alerts.length;
+        const active = this.alerts.filter(a => a.active === 'TRUE').length;
+        const highPriority = this.alerts.filter(a => a.priority === 'high' && a.active === 'TRUE').length;
+
+        document.getElementById('totalAlerts').textContent = total;
+        document.getElementById('activeAlerts').textContent = active;
+        document.getElementById('highPriorityAlerts').textContent = highPriority;
+    }
+
     // Setup event listeners
     setupEventListeners() {
-        // Add device button
+        // Existing device listeners
         document.getElementById('addDeviceBtn').addEventListener('click', () => {
             this.showAddDeviceModal();
         });
 
-        // Modal close events
         document.querySelector('.modal-close').addEventListener('click', () => {
             this.hideAddDeviceModal();
         });
@@ -130,32 +219,37 @@ class AdminInterface {
             this.hideAddDeviceModal();
         });
 
-        // Click outside modal to close
         document.getElementById('addDeviceModal').addEventListener('click', (e) => {
             if (e.target === document.getElementById('addDeviceModal')) {
                 this.hideAddDeviceModal();
             }
         });
 
-        // Add device form submission
         document.getElementById('addDeviceForm').addEventListener('submit', (e) => {
             e.preventDefault();
             this.handleAddDevice();
         });
 
-        // Auto-refresh devices every 30 seconds
+        // New alert listeners
+        document.getElementById('alertForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.handleAddAlert();
+        });
+
+        // Auto-refresh both devices and alerts every 30 seconds
         setInterval(() => {
             this.loadDevices();
+            this.loadAlerts();
         }, 30000);
     }
 
-    // Show add device modal
+    // === EXISTING DEVICE METHODS (with building support) ===
+
     showAddDeviceModal() {
         document.getElementById('addDeviceModal').style.display = 'block';
         document.getElementById('deviceId').focus();
     }
 
-    // Hide add device modal
     hideAddDeviceModal() {
         document.getElementById('addDeviceModal').style.display = 'none';
         document.getElementById('addDeviceForm').reset();
@@ -167,13 +261,13 @@ class AdminInterface {
         this.editingDevice = null;
     }
 
-    // Handle add device form submission
     async handleAddDevice() {
         const formData = new FormData(document.getElementById('addDeviceForm'));
         const deviceData = {
             deviceId: formData.get('deviceId'),
             ipAddress: formData.get('ipAddress'),
             location: formData.get('location'),
+            building: formData.get('building'), // NEW: Include building
             template: formData.get('template'),
             theme: formData.get('theme'),
             slideId: formData.get('slideId'),
@@ -199,26 +293,19 @@ class AdminInterface {
                 this.hideAddDeviceModal();
 
                 if (result.requiresManualUpdate) {
-                    // Show manual instructions
                     this.showSuccess(`Device "${deviceData.deviceId}" configuration ready!
 
 Please ${isEditing ? 'update' : 'add'} this device in your Google Sheet manually:
-1. Open: https://docs.google.com/spreadsheets/d/1Zmzmg_QXsrPXvB6BR-j9lEExzTZ8sCHBneBJq90dlw0
+1. Open your Displays sheet
 2. ${isEditing ? 'Update the row for' : 'Add a new row with'} deviceId: ${deviceData.deviceId}
-3. Set the following values:
-   • location: ${deviceData.location}
-   • template: ${deviceData.template}
-   • theme: ${deviceData.theme}
-   • slideId: ${deviceData.slideId}
-   • refreshInterval: ${deviceData.refreshInterval}
+3. Set building: ${deviceData.building}
+4. Set other values as needed
 
 The device will pick up the new configuration within a few minutes.`);
                 } else {
-                    // Success with automatic Google Sheets update
                     this.showSuccess(result.message);
                 }
 
-                // Refresh the devices list after a short delay
                 setTimeout(() => {
                     this.loadDevices();
                 }, 3000);
@@ -232,42 +319,34 @@ The device will pick up the new configuration within a few minutes.`);
         }
     }
 
-    // Preview device (open in new tab)
     previewDevice(deviceId) {
         const url = `/?deviceId=${deviceId}`;
         window.open(url, '_blank', 'width=1024,height=768');
     }
 
-    // Edit device - now with a proper implementation
     editDevice(deviceId) {
         const device = this.devices.find(d => d.deviceId === deviceId);
         if (device) {
-            // Pre-populate the add device form with current values
             document.getElementById('deviceId').value = device.deviceId;
+            document.getElementById('ipAddress').value = device.ipAddress || '';
             document.getElementById('location').value = device.location || '';
+            document.getElementById('building').value = device.building || ''; // NEW: Include building
             document.getElementById('template').value = device.template || 'standard';
             document.getElementById('theme').value = device.theme || 'default';
             document.getElementById('slideId').value = device.slideId || '';
             document.getElementById('refreshInterval').value = device.refreshInterval || 15;
 
-            // Change the form title and button text
             document.querySelector('.modal-header h3').textContent = `Edit Device: ${deviceId}`;
             document.querySelector('button[type="submit"]').textContent = 'Update Device';
-
-            // Disable deviceId field since we're editing
             document.getElementById('deviceId').disabled = true;
 
-            // Store the fact that we're editing
             this.editingDevice = deviceId;
-
-            // Show the modal
             this.showAddDeviceModal();
         }
     }
 
-    // Delete device
     async deleteDevice(deviceId) {
-        if (!confirm(`Are you sure you want to delete device "${deviceId}"?\n\nThis will require manual removal from the Google Sheet.`)) {
+        if (!confirm(`Are you sure you want to delete device "${deviceId}"?`)) {
             return;
         }
 
@@ -278,22 +357,8 @@ The device will pick up the new configuration within a few minutes.`);
 
             if (response.ok) {
                 const result = await response.json();
-
-                if (result.requiresManualUpdate) {
-                    this.showSuccess(`Device "${deviceId}" marked for deletion!
-
-Please remove this device from your Google Sheet manually:
-1. Open: https://docs.google.com/spreadsheets/d/1Zmzmg_QXsrPXvB6BR-j9lEExzTZ8sCHBneBJq90dlw0
-2. Find the row with deviceId: ${deviceId}
-3. Delete that entire row
-
-The device will stop receiving configuration once removed from the sheet.`);
-                } else {
-                    this.showSuccess(result.message);
-                }
-
-                // Don't refresh automatically since it's manual - just show instructions
-                console.log('Device marked for deletion - manual removal required');
+                this.showSuccess(result.message);
+                setTimeout(() => this.loadDevices(), 2000);
             } else {
                 const error = await response.json();
                 throw new Error(error.message || 'Failed to delete device');
@@ -304,7 +369,236 @@ The device will stop receiving configuration once removed from the sheet.`);
         }
     }
 
-    // Utility functions
+    // === NEW ALERT METHODS ===
+
+    // In your admin.js, REPLACE the handleAddAlert method with this corrected version:
+
+    async handleAddAlert() {
+        const selectedBuildings = this.getSelectedBuildings();
+
+        if (selectedBuildings.length === 0) {
+            this.showError('Please select at least one building for this alert.');
+            return;
+        }
+
+        const formData = new FormData(document.getElementById('alertForm'));
+        const alertData = {
+            name: formData.get('alertName'),
+            slideId: formData.get('alertSlideId'),
+            buildings: selectedBuildings,
+            priority: formData.get('alertPriority'),
+            expires: formData.get('alertExpires') || null
+        };
+
+        try {
+            const response = await fetch('/api/admin/alerts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(alertData)
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+
+                if (result.requiresManualUpdate) {
+                    this.showSuccess(`Alert "${alertData.name}" configuration ready!
+
+Please add this alert to your Alerts sheet manually:
+1. Open your Google Sheets and go to the Alerts sheet
+2. Add a new row with these values:
+   • Name: ${alertData.name}
+   • Slide ID: ${alertData.slideId}
+   • Buildings: ${alertData.buildings.join(',')}
+   • Priority: ${alertData.priority}
+   • Active: TRUE
+   • Expires: ${alertData.expires || '(leave empty)'}
+
+The alert will be active once added to the sheet.`);
+                } else {
+                    this.showSuccess(result.message);
+                }
+
+                // Reset form and refresh
+                document.getElementById('alertForm').reset();
+                clearAllBuildings(); // FIXED: Call global function directly, not this.clearAllBuildings()
+                setTimeout(() => {
+                    this.loadAlerts();
+                }, 3000);
+            } else {
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to add alert');
+            }
+        } catch (error) {
+            console.error('Error adding alert:', error);
+            this.showError(`Failed to add alert: ${error.message}`);
+        }
+    }
+
+    async toggleAlert(alertId) {
+        try {
+            const response = await fetch(`/api/admin/alerts/${alertId}/toggle`, {
+                method: 'PATCH'
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.showSuccess(result.message);
+                setTimeout(() => this.loadAlerts(), 1000);
+            } else {
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to toggle alert');
+            }
+        } catch (error) {
+            console.error('Error toggling alert:', error);
+            this.showError(`Failed to toggle alert: ${error.message}`);
+        }
+    }
+
+    editAlert(alertId) {
+        const alert = this.alerts.find(a => a.alertId === alertId);
+        if (alert) {
+            // Populate edit form
+            document.getElementById('editAlertId').value = alert.alertId;
+            document.getElementById('editAlertName').value = alert.name;
+            document.getElementById('editAlertSlideId').value = alert.slideId;
+            document.getElementById('editAlertPriority').value = alert.priority;
+            document.getElementById('editAlertExpires').value = alert.expires || '';
+
+            // Set building checkboxes
+            const checkboxes = document.querySelectorAll('#editBuildingCheckboxes input[type="checkbox"]');
+            checkboxes.forEach(cb => {
+                cb.checked = alert.buildings.includes(cb.value);
+            });
+
+            this.showAlertEditModal();
+        }
+    }
+
+    async deleteAlert(alertId) {
+        const alert = this.alerts.find(a => a.alertId === alertId);
+        if (!confirm(`Are you sure you want to delete alert "${alert?.name}"?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/admin/alerts/${alertId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.showSuccess(result.message);
+                setTimeout(() => this.loadAlerts(), 2000);
+            } else {
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to delete alert');
+            }
+        } catch (error) {
+            console.error('Error deleting alert:', error);
+            this.showError(`Failed to delete alert: ${error.message}`);
+        }
+    }
+
+    showAlertEditModal() {
+        document.getElementById('alertEditModal').style.display = 'block';
+    }
+
+    closeAlertEditModal() {
+        document.getElementById('alertEditModal').style.display = 'none';
+    }
+
+    async saveAlertEdit() {
+        const alertId = document.getElementById('editAlertId').value;
+        const selectedBuildings = this.getEditSelectedBuildings();
+        
+        if (selectedBuildings.length === 0) {
+            this.showError('Please select at least one building for this alert.');
+            return;
+        }
+
+        const alertData = {
+            name: document.getElementById('editAlertName').value,
+            slideId: document.getElementById('editAlertSlideId').value,
+            buildings: selectedBuildings,
+            priority: document.getElementById('editAlertPriority').value,
+            expires: document.getElementById('editAlertExpires').value || null
+        };
+
+        try {
+            const response = await fetch(`/api/admin/alerts/${alertId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(alertData)
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.showSuccess(result.message);
+                this.closeAlertEditModal();
+                setTimeout(() => this.loadAlerts(), 2000);
+            } else {
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to update alert');
+            }
+        } catch (error) {
+            console.error('Error updating alert:', error);
+            this.showError(`Failed to update alert: ${error.message}`);
+        }
+    }
+
+    // === BUILDING SELECTION HELPERS ===
+
+    getSelectedBuildings() {
+        const checkboxes = document.querySelectorAll('input[name="buildings"]:checked');
+        return Array.from(checkboxes).map(cb => cb.value);
+    }
+
+    getEditSelectedBuildings() {
+        const checkboxes = document.querySelectorAll('input[name="editBuildings"]:checked');
+        return Array.from(checkboxes).map(cb => cb.value);
+    }
+
+    selectBuildings(codes) {
+        // Clear all checkboxes first
+        document.querySelectorAll('input[name="buildings"]').forEach(cb => {
+            cb.checked = false;
+        });
+        
+        // Check the specified building codes
+        codes.forEach(code => {
+            const checkbox = document.querySelector(`input[name="buildings"][value="${code}"]`);
+            if (checkbox) {
+                checkbox.checked = true;
+            }
+        });
+    }
+
+    // === GLOBAL HELPER FUNCTIONS ===
+
+    formatBuildingNames(buildingCodes) {
+        const buildingNames = {
+            'SE': 'Schumann Elementary',
+            'IS': 'Intermediate School', 
+            'MS': 'Middle School',
+            'HS': 'High School',
+            'DC': 'Discovery Center',
+            'DO': 'District Office'
+        };
+
+        if (!buildingCodes || buildingCodes.length === 0) return 'None';
+        
+        return buildingCodes.map(code => {
+            const name = buildingNames[code];
+            return name ? `${code}` : code;
+        }).join(', ');
+    }
+
+    // === EXISTING UTILITY METHODS ===
+
     formatDate(dateString) {
         if (!dateString || dateString === 'Never') return 'Never';
 
@@ -334,11 +628,9 @@ The device will stop receiving configuration once removed from the sheet.`);
     }
 
     showNotification(message, type = 'info') {
-        // Create notification element
         const notification = document.createElement('div');
         notification.className = `notification notification-${type}`;
 
-        // Handle multiline messages
         if (message.includes('\n')) {
             const lines = message.split('\n');
             const title = lines[0];
@@ -352,7 +644,6 @@ The device will stop receiving configuration once removed from the sheet.`);
             notification.textContent = message;
         }
 
-        // Add styles for notification
         notification.style.cssText = `
             position: fixed;
             top: 20px;
@@ -369,7 +660,6 @@ The device will stop receiving configuration once removed from the sheet.`);
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         `;
 
-        // Set background color based on type
         switch (type) {
             case 'success':
                 notification.style.backgroundColor = '#38a169';
@@ -381,16 +671,13 @@ The device will stop receiving configuration once removed from the sheet.`);
                 notification.style.backgroundColor = '#667eea';
         }
 
-        // Add to DOM
         document.body.appendChild(notification);
 
-        // Animate in
         requestAnimationFrame(() => {
             notification.style.opacity = '1';
             notification.style.transform = 'translateX(0)';
         });
 
-        // Remove after 8 seconds (longer for detailed messages)
         setTimeout(() => {
             notification.style.opacity = '0';
             notification.style.transform = 'translateX(100%)';
@@ -401,6 +688,52 @@ The device will stop receiving configuration once removed from the sheet.`);
             }, 300);
         }, 8000);
     }
+}
+
+// === GLOBAL BUILDING SELECTION FUNCTIONS ===
+// (These are called by the HTML onclick handlers)
+
+function selectAllSchools() {
+    admin.selectBuildings(['SE', 'IS', 'MS', 'HS']);
+}
+
+function selectElementaryLevel() {
+    admin.selectBuildings(['SE', 'IS']);
+}
+
+function selectSecondaryLevel() {
+    admin.selectBuildings(['MS', 'HS']);
+}
+
+function selectAllBuildings() {
+    admin.selectBuildings(['SE', 'IS', 'MS', 'HS', 'DC', 'DO']);
+}
+
+function clearAllBuildings() {
+    admin.selectBuildings([]);
+}
+
+function refreshAlerts() {
+    const refreshText = document.getElementById('refreshAlertsText');
+    refreshText.textContent = 'Refreshing...';
+    
+    admin.loadAlerts().then(() => {
+        refreshText.textContent = 'Refresh';
+    });
+}
+
+function filterAlerts() {
+    const filter = document.getElementById('alertFilter').value;
+    // TODO: Implement filtering logic if needed
+    console.log('Filter alerts by:', filter);
+}
+
+function closeAlertEditModal() {
+    admin.closeAlertEditModal();
+}
+
+function saveAlertEdit() {
+    admin.saveAlertEdit();
 }
 
 // Initialize admin interface when page loads

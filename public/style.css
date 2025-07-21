@@ -162,3 +162,111 @@ html, body {
     height: 100%;
     width: 100%;
 }
+
+/* ADD these alert banner styles to your public/style.css file */
+
+/* Alert Banner Styles */
+.alert-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    padding: 12px 20px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 18px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    display: none;
+}
+
+.alert-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.alert-icon {
+    font-size: 24px;
+    animation: pulse 2s infinite;
+}
+
+.alert-text {
+    flex: 1;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.alert-priority {
+    background: rgba(255,255,255,0.25);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+/* Priority-based colors */
+.alert-banner.priority-high {
+    background: linear-gradient(135deg, #dc2626, #b91c1c);
+    color: white;
+}
+
+.alert-banner.priority-medium {
+    background: linear-gradient(135deg, #d97706, #b45309);
+    color: white;
+}
+
+.alert-banner.priority-low {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: white;
+}
+
+/* Pulse animation for high priority */
+.alert-banner.priority-high {
+    animation: alertBannerPulse 3s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { 
+        transform: scale(1); 
+    }
+    50% { 
+        transform: scale(1.1); 
+    }
+}
+
+@keyframes alertBannerPulse {
+    0%, 100% { 
+        opacity: 1; 
+        transform: translateY(0); 
+    }
+    50% { 
+        opacity: 0.9; 
+        transform: translateY(-2px); 
+    }
+}
+
+/* Responsive design for smaller screens */
+@media (max-width: 768px) {
+    .alert-banner {
+        padding: 10px 15px;
+        font-size: 16px;
+    }
+    
+    .alert-content {
+        gap: 10px;
+    }
+    
+    .alert-text {
+        font-size: 16px;
+    }
+    
+    .alert-priority {
+        font-size: 12px;
+        padding: 3px 8px;
+    }
+}
