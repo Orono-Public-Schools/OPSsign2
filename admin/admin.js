@@ -117,15 +117,18 @@ class AdminInterface {
                 </div>
 
                 <div class="device-actions">
-                    <button class="btn btn-secondary btn-small" onclick="admin.previewDevice('${device.deviceId}')">
-                        👁️ Preview
-                    </button>
-                    <button class="btn btn-secondary btn-small" onclick="admin.editDevice('${device.deviceId}')">
-                        ✏️ Edit
-                    </button>
-                    <button class="btn btn-danger btn-small" onclick="admin.deleteDevice('${device.deviceId}')">
-                        🗑️ Delete
-                    </button>
+                        <button class="btn btn-secondary btn-small" onclick="admin.previewDevice('${device.deviceId}')">
+                            👁️ Preview
+                        </button>
+                        <button class="btn btn-info btn-small" onclick="admin.pushRefreshToDevice('${device.deviceId}')">
+                            📡 Push Refresh
+                        </button>
+                        <button class="btn btn-secondary btn-small" onclick="editDeviceClick('${device.deviceId}')">
+                            ✏️ Edit
+                        </button>
+                        <button class="btn btn-danger btn-small" onclick="admin.deleteDevice('${device.deviceId}')">
+                            🗑️ Delete
+                        </button>
                 </div>
             </div>
         `).join('');
@@ -171,6 +174,9 @@ class AdminInterface {
                     <button class="btn btn-secondary btn-small" onclick="admin.toggleAlert('${alert.alertId}')">
                         ${alert.active === 'TRUE' ? '⏸️ Deactivate' : '▶️ Activate'}
                     </button>
+                    <button class="btn btn-urgent btn-small" onclick="admin.deployAlertNow('${alert.alertId}')">
+                        ⚡ Deploy Now
+                    </button>
                     <button class="btn btn-secondary btn-small" onclick="admin.editAlert('${alert.alertId}')">
                         ✏️ Edit
                     </button>
@@ -186,11 +192,9 @@ class AdminInterface {
     updateStats() {
         const total = this.devices.length;
         const online = this.devices.filter(d => d.status === 'online').length;
-        const offline = total - online;
 
         document.getElementById('totalDevices').textContent = total;
         document.getElementById('onlineDevices').textContent = online;
-        document.getElementById('offlineDevices').textContent = offline;
     }
 
     // Update alert statistics
@@ -206,9 +210,9 @@ class AdminInterface {
 
     // Setup event listeners
     setupEventListeners() {
-        // Existing device listeners
+        // Device modal listeners
         document.getElementById('addDeviceBtn').addEventListener('click', () => {
-            this.showAddDeviceModal();
+            openAddDeviceModal();
         });
 
         document.querySelector('.modal-close').addEventListener('click', () => {
@@ -227,10 +231,20 @@ class AdminInterface {
 
         document.getElementById('addDeviceForm').addEventListener('submit', (e) => {
             e.preventDefault();
-            this.handleAddDevice();
+    
+            const editDeviceId = document.getElementById('editDeviceId').value;
+            if (editDeviceId) {
+                // Edit mode
+                const formData = new FormData(e.target);
+                const deviceData = Object.fromEntries(formData);
+                updateDevice(editDeviceId, deviceData);
+            } else {
+                // Add mode
+                this.handleAddDevice();
+            }
         });
 
-        // New alert listeners
+        // Alert form listener
         document.getElementById('alertForm').addEventListener('submit', (e) => {
             e.preventDefault();
             this.handleAddAlert();
@@ -243,20 +257,22 @@ class AdminInterface {
         }, 30000);
     }
 
-    // === EXISTING DEVICE METHODS (with building support) ===
+    // === DEVICE MODAL METHODS ===
 
     showAddDeviceModal() {
-        document.getElementById('addDeviceModal').style.display = 'block';
+        document.getElementById('addDeviceModal').classList.add('show');
         document.getElementById('deviceId').focus();
     }
 
     hideAddDeviceModal() {
-        document.getElementById('addDeviceModal').style.display = 'none';
+        document.getElementById('addDeviceModal').classList.remove('show');
         document.getElementById('addDeviceForm').reset();
 
         // Reset form for adding (not editing)
-        document.querySelector('.modal-header h3').textContent = 'Add New Device';
-        document.querySelector('button[type="submit"]').textContent = 'Add Device';
+        const modalTitle = document.querySelector('.modal-header h3');
+        const submitBtn = document.querySelector('button[type="submit"]');
+        if (modalTitle) modalTitle.textContent = 'Add New Device';
+        if (submitBtn) submitBtn.textContent = 'Add Device';
         document.getElementById('deviceId').disabled = false;
         this.editingDevice = null;
     }
@@ -267,7 +283,7 @@ class AdminInterface {
             deviceId: formData.get('deviceId'),
             ipAddress: formData.get('ipAddress'),
             location: formData.get('location'),
-            building: formData.get('building'), // NEW: Include building
+            building: formData.get('building'),
             template: formData.get('template'),
             theme: formData.get('theme'),
             slideId: formData.get('slideId'),
@@ -330,14 +346,16 @@ The device will pick up the new configuration within a few minutes.`);
             document.getElementById('deviceId').value = device.deviceId;
             document.getElementById('ipAddress').value = device.ipAddress || '';
             document.getElementById('location').value = device.location || '';
-            document.getElementById('building').value = device.building || ''; // NEW: Include building
+            document.getElementById('building').value = device.building || '';
             document.getElementById('template').value = device.template || 'standard';
             document.getElementById('theme').value = device.theme || 'default';
             document.getElementById('slideId').value = device.slideId || '';
             document.getElementById('refreshInterval').value = device.refreshInterval || 15;
 
-            document.querySelector('.modal-header h3').textContent = `Edit Device: ${deviceId}`;
-            document.querySelector('button[type="submit"]').textContent = 'Update Device';
+            const modalTitle = document.querySelector('.modal-header h3');
+            const submitBtn = document.querySelector('button[type="submit"]');
+            if (modalTitle) modalTitle.textContent = `Edit Device: ${deviceId}`;
+            if (submitBtn) submitBtn.textContent = 'Update Device';
             document.getElementById('deviceId').disabled = true;
 
             this.editingDevice = deviceId;
@@ -369,9 +387,7 @@ The device will pick up the new configuration within a few minutes.`);
         }
     }
 
-    // === NEW ALERT METHODS ===
-
-    // In your admin.js, REPLACE the handleAddAlert method with this corrected version:
+    // === ALERT METHODS ===
 
     async handleAddAlert() {
         const selectedBuildings = this.getSelectedBuildings();
@@ -422,7 +438,7 @@ The alert will be active once added to the sheet.`);
 
                 // Reset form and refresh
                 document.getElementById('alertForm').reset();
-                clearAllBuildings(); // FIXED: Call global function directly, not this.clearAllBuildings()
+                clearAllBuildings();
                 setTimeout(() => {
                     this.loadAlerts();
                 }, 3000);
@@ -502,11 +518,11 @@ The alert will be active once added to the sheet.`);
     }
 
     showAlertEditModal() {
-        document.getElementById('alertEditModal').style.display = 'block';
+        document.getElementById('alertEditModal').classList.add('show');
     }
 
     closeAlertEditModal() {
-        document.getElementById('alertEditModal').style.display = 'none';
+        document.getElementById('alertEditModal').classList.remove('show');
     }
 
     async saveAlertEdit() {
@@ -550,6 +566,79 @@ The alert will be active once added to the sheet.`);
         }
     }
 
+    // === SSE PUSH METHODS ===
+
+    async pushRefreshToDevice(deviceId) {
+        try {
+            const response = await fetch(`/api/admin/push/refresh`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceIds: [deviceId] })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.showSuccess(`Refresh pushed to device ${deviceId} (${result.pushed}/${result.results.length} successful)`);
+            } else {
+                throw new Error('Failed to push refresh');
+            }
+        } catch (error) {
+            console.error('Error pushing refresh:', error);
+            this.showError('Failed to push refresh to device');
+        }
+    }
+
+    async pushRefreshToAll() {
+        try {
+            const response = await fetch(`/api/admin/push/refresh-all`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.showSuccess(`Refresh pushed to all devices (${result.devicesNotified}/${result.totalDevices} connected)`);
+            } else {
+                throw new Error('Failed to push refresh to all');
+            }
+        } catch (error) {
+            console.error('Error pushing refresh to all:', error);
+            this.showError('Failed to push refresh to all devices');
+        }
+    }
+
+    async deployAlertNow(alertId) {
+        try {
+            const response = await fetch(`/api/admin/alerts/${alertId}/deploy`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.showSuccess(`Alert deployed immediately to ${result.devicesNotified} devices in buildings: ${result.buildings.join(', ')}`);
+            } else {
+                throw new Error('Failed to deploy alert');
+            }
+        } catch (error) {
+            console.error('Error deploying alert:', error);
+            this.showError('Failed to deploy alert immediately');
+        }
+    }
+
+    async checkSSEStatus() {
+        try {
+            const response = await fetch('/api/admin/sse/status');
+            if (response.ok) {
+                const status = await response.json();
+                this.showSuccess(`SSE Status: ${status.totalConnections} devices connected\nConnected devices: ${status.connectedDevices.join(', ') || 'None'}`);
+            } else {
+                throw new Error('Failed to get SSE status');
+            }
+        } catch (error) {
+            console.error('Error checking SSE status:', error);
+            this.showError('Failed to check SSE status');
+        }
+    }
+
     // === BUILDING SELECTION HELPERS ===
 
     getSelectedBuildings() {
@@ -577,7 +666,7 @@ The alert will be active once added to the sheet.`);
         });
     }
 
-    // === GLOBAL HELPER FUNCTIONS ===
+    // === HELPER FUNCTIONS ===
 
     formatBuildingNames(buildingCodes) {
         const buildingNames = {
@@ -596,8 +685,6 @@ The alert will be active once added to the sheet.`);
             return name ? `${code}` : code;
         }).join(', ');
     }
-
-    // === EXISTING UTILITY METHODS ===
 
     formatDate(dateString) {
         if (!dateString || dateString === 'Never') return 'Never';
@@ -691,7 +778,6 @@ The alert will be active once added to the sheet.`);
 }
 
 // === GLOBAL BUILDING SELECTION FUNCTIONS ===
-// (These are called by the HTML onclick handlers)
 
 function selectAllSchools() {
     admin.selectBuildings(['SE', 'IS', 'MS', 'HS']);
@@ -724,7 +810,6 @@ function refreshAlerts() {
 
 function filterAlerts() {
     const filter = document.getElementById('alertFilter').value;
-    // TODO: Implement filtering logic if needed
     console.log('Filter alerts by:', filter);
 }
 
@@ -734,6 +819,130 @@ function closeAlertEditModal() {
 
 function saveAlertEdit() {
     admin.saveAlertEdit();
+}
+
+// === GLOBAL MODAL FUNCTIONS ===
+
+// Function to open modal in "Add" mode
+function openAddDeviceModal() {
+    const form = document.getElementById('addDeviceForm');
+    const editDeviceId = document.getElementById('editDeviceId');
+    const modalTitle = document.getElementById('modalTitle');
+    const submitBtn = document.getElementById('submitDeviceBtn');
+    const modal = document.getElementById('addDeviceModal');
+    
+    if (!form || !modalTitle || !submitBtn || !modal) {
+        console.error('Missing modal elements');
+        return;
+    }
+    
+    form.reset();
+    if (editDeviceId) editDeviceId.value = '';
+    
+    // Set modal to "Add" mode
+    modalTitle.textContent = 'Add New Device';
+    submitBtn.textContent = 'Add Device';
+    
+    // Show modal
+    modal.classList.add('show');
+}
+
+// Store device data globally for edit mode
+let currentEditDevice = null;
+
+// Function to open modal in "Edit" mode
+function openEditDeviceModal(deviceData) {
+    // Store device data
+    currentEditDevice = deviceData;
+    
+    // Get all elements first
+    const elements = {
+        editDeviceId: document.getElementById('editDeviceId'),
+        deviceId: document.getElementById('deviceId'),
+        ipAddress: document.getElementById('ipAddress'),
+        location: document.getElementById('location'),
+        building: document.getElementById('building'),
+        template: document.getElementById('template'),
+        theme: document.getElementById('theme'),
+        slideId: document.getElementById('slideId'),
+        refreshInterval: document.getElementById('refreshInterval'),
+        modalTitle: document.getElementById('modalTitle'),
+        submitBtn: document.getElementById('submitDeviceBtn'),
+        modal: document.getElementById('addDeviceModal')
+    };
+    
+    // Check if all required elements exist
+    const missingElements = Object.entries(elements).filter(([key, el]) => !el).map(([key]) => key);
+    if (missingElements.length > 0) {
+        console.error('Missing elements:', missingElements);
+        return;
+    }
+    
+    // Populate form with device data
+    elements.editDeviceId.value = deviceData.deviceId;
+    elements.deviceId.value = deviceData.deviceId;
+    elements.ipAddress.value = deviceData.ipAddress || '';
+    elements.location.value = deviceData.location || '';
+    elements.building.value = deviceData.building || '';
+    elements.template.value = deviceData.template || 'standard';
+    elements.theme.value = deviceData.theme || 'default';
+    elements.slideId.value = deviceData.slideId || '';
+    elements.refreshInterval.value = deviceData.refreshInterval || 15;
+    
+    // Set modal to "Edit" mode
+    elements.modalTitle.textContent = 'Edit Device: ' + deviceData.deviceId;
+    elements.submitBtn.textContent = 'Save Changes';
+    
+    // Show modal
+    elements.modal.classList.add('show');
+}
+
+// Helper function to handle edit clicks
+function editDeviceClick(deviceId) {
+    // Find the device data from the admin's device list
+    if (!admin || !admin.devices) {
+        console.error('Admin or devices list not available');
+        return;
+    }
+    
+    const device = admin.devices.find(d => d.deviceId === deviceId);
+    if (device) {
+        openEditDeviceModal(device);
+    } else {
+        console.error('Device not found:', deviceId);
+        console.log('Available devices:', admin.devices.map(d => d.deviceId));
+    }
+}
+
+// Update device function
+async function updateDevice(deviceId, deviceData) {
+    try {
+        const response = await fetch(`/api/admin/devices/${deviceId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(deviceData)
+        });
+        
+        if (response.ok) {
+            // Close modal
+            const modal = document.getElementById('addDeviceModal');
+            if (modal) modal.classList.remove('show');
+            currentEditDevice = null;
+            
+            // Refresh the device list
+            admin.loadDevices();
+            
+            alert('Device updated successfully!');
+        } else {
+            const errorText = await response.text();
+            throw new Error(`Failed to update device: ${errorText}`);
+        }
+    } catch (error) {
+        console.error('Error updating device:', error);
+        alert('Error updating device: ' + error.message);
+    }
 }
 
 // Initialize admin interface when page loads

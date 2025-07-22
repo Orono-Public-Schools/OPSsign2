@@ -14,6 +14,9 @@ const port = process.env.PORT || 3000;
 const deviceStatuses = new Map();
 const deviceIPs = new Map();
 
+// SSE Connection Management
+const connectedDevices = new Map(); // deviceId -> { response, connectedAt, lastPing }
+
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -129,6 +132,230 @@ app.get('/auth/logout', (req, res) => {
   });
 });
 
+// ==================== SSE IMPLEMENTATION ====================
+
+// SSE endpoint for real-time device communication
+app.get('/api/device/:deviceId/events', (req, res) => {
+  const deviceId = req.params.deviceId;
+  
+  console.log(`🔌 SSE connection request from device: ${deviceId}`);
+  
+  // Set up SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*', // Adjust for your domain if needed
+    'Access-Control-Allow-Headers': 'Cache-Control'
+  });
+  
+  // Send initial connection confirmation
+  res.write(`data: ${JSON.stringify({
+    type: 'connected',
+    message: 'SSE connection established',
+    deviceId: deviceId,
+    timestamp: Date.now()
+  })}\n\n`);
+  
+  // Store this connection
+  connectedDevices.set(deviceId, {
+    response: res,
+    connectedAt: Date.now(),
+    lastPing: Date.now()
+  });
+  
+  console.log(`📡 Device ${deviceId} connected via SSE. Total connections: ${connectedDevices.size}`);
+  
+  // Clean up when connection closes
+  req.on('close', () => {
+    connectedDevices.delete(deviceId);
+    console.log(`📴 Device ${deviceId} disconnected from SSE. Remaining connections: ${connectedDevices.size}`);
+  });
+  
+  req.on('error', (err) => {
+    console.log(`❌ SSE error for device ${deviceId}:`, err.message);
+    connectedDevices.delete(deviceId);
+  });
+});
+
+// Push function - send data to specific device
+function pushToDevice(deviceId, data) {
+  const connection = connectedDevices.get(deviceId);
+  if (connection && connection.response) {
+    try {
+      const message = JSON.stringify({
+        ...data,
+        timestamp: Date.now(),
+        deviceId: deviceId
+      });
+      
+      connection.response.write(`data: ${message}\n\n`);
+      connection.lastPing = Date.now();
+      
+      console.log(`📤 Pushed to device ${deviceId}:`, data.type);
+      return true;
+    } catch (err) {
+      console.log(`❌ Failed to push to device ${deviceId}:`, err.message);
+      connectedDevices.delete(deviceId);
+      return false;
+    }
+  }
+  console.log(`⚠️  Device ${deviceId} not connected for push`);
+  return false;
+}
+
+// Push function - send data to multiple specific devices
+function pushToDevices(deviceIds, data) {
+  const results = deviceIds.map(deviceId => ({
+    deviceId,
+    success: pushToDevice(deviceId, data)
+  }));
+  
+  const successful = results.filter(r => r.success).length;
+  console.log(`📤 Pushed to ${successful}/${deviceIds.length} devices`);
+  
+  return results;
+}
+
+// Push function - send data to devices in specific buildings
+function pushToBuilding(buildingCode, data) {
+  // Get devices for this building from current sheet data
+  fetchGoogleSheet()
+    .then(rows => {
+      const devices = parseSheetData(rows);
+      const buildingDevices = devices
+        .filter(device => device.building === buildingCode)
+        .map(device => device.deviceId);
+      
+      if (buildingDevices.length > 0) {
+        console.log(`🏢 Pushing to ${buildingDevices.length} devices in building ${buildingCode}`);
+        return pushToDevices(buildingDevices, data);
+      } else {
+        console.log(`⚠️  No devices found for building ${buildingCode}`);
+        return [];
+      }
+    })
+    .catch(err => {
+      console.error(`❌ Error getting devices for building ${buildingCode}:`, err.message);
+      return [];
+    });
+}
+
+// Push function - send data to all connected devices
+function pushToAllDevices(data) {
+  const deviceIds = Array.from(connectedDevices.keys());
+  console.log(`📡 Pushing to all ${deviceIds.length} connected devices`);
+  
+  return pushToDevices(deviceIds, data);
+}
+
+// Helper function - get list of connected devices
+function getConnectedDevices() {
+  return Array.from(connectedDevices.keys());
+}
+
+// Helper function - get connection info
+function getConnectionInfo() {
+  const connections = {};
+  connectedDevices.forEach((connection, deviceId) => {
+    connections[deviceId] = {
+      connectedAt: connection.connectedAt,
+      lastPing: connection.lastPing,
+      connectedFor: Date.now() - connection.connectedAt
+    };
+  });
+  return connections;
+}
+
+// ==================== SSE ADMIN API ROUTES ====================
+
+// SSE status endpoint for admin
+app.get('/api/admin/sse/status', requireAuth, (req, res) => {
+  res.json({
+    connectedDevices: getConnectedDevices(),
+    totalConnections: connectedDevices.size,
+    connectionInfo: getConnectionInfo()
+  });
+});
+
+// Test push to specific device
+app.post('/api/admin/sse/test-push/:deviceId', requireAuth, (req, res) => {
+  const deviceId = req.params.deviceId;
+  const success = pushToDevice(deviceId, {
+    type: 'test',
+    message: 'This is a test push from the admin interface',
+    testData: req.body
+  });
+  
+  res.json({
+    success,
+    deviceId,
+    message: success ? 'Push sent successfully' : 'Device not connected'
+  });
+});
+
+// Test push to all devices
+app.post('/api/admin/sse/test-push-all', requireAuth, (req, res) => {
+  const results = pushToAllDevices({
+    type: 'test',
+    message: 'This is a test push to all devices from admin interface',
+    testData: req.body
+  });
+  
+  res.json({
+    success: true,
+    results,
+    totalDevices: results.length,
+    successfulPushes: results.filter(r => r.success).length
+  });
+});
+
+// Push refresh to specific devices
+app.post('/api/admin/push/refresh', requireAuth, (req, res) => {
+  try {
+    const { deviceIds } = req.body;
+    const results = pushToDevices(deviceIds, { type: 'refresh' });
+    
+    res.json({
+      success: true,
+      results: results,
+      pushed: results.filter(r => r.success).length,
+      failed: results.filter(r => !r.success).length
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Push refresh to all devices
+app.post('/api/admin/push/refresh-all', requireAuth, (req, res) => {
+  try {
+    const results = pushToAllDevices({ type: 'refresh' });
+    res.json({ 
+      success: true, 
+      devicesNotified: results.filter(r => r.success).length,
+      totalDevices: results.length
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== END SSE IMPLEMENTATION ====================
+
+// Periodic cleanup of stale SSE connections
+setInterval(() => {
+  const now = Date.now();
+  const staleTimeout = 5 * 60 * 1000; // 5 minutes
+  
+  connectedDevices.forEach((connection, deviceId) => {
+    if (now - connection.lastPing > staleTimeout) {
+      console.log(`🧹 Removing stale SSE connection for device ${deviceId}`);
+      connectedDevices.delete(deviceId);
+    }
+  });
+}, 60000); // Check every minute
+
 // Google Sheets helper functions
 let auth = null;
 let sheets = null;
@@ -141,9 +368,20 @@ async function initializeGoogleSheets() {
 
     if (serviceAccountEmail && serviceAccountKey) {
       console.log('🔄 Attempting to initialize Google Sheets API with service account...');
-      // Skip service account initialization for now due to OpenSSL issues
-      console.log('⚠️  Service account temporarily disabled due to Node.js 18 OpenSSL compatibility');
-      sheets = null;
+      // Initialize service account - simplified approach
+      try {
+        const serviceAccountPath = './service-account-key.json';
+        const auth = new google.auth.GoogleAuth({
+          keyFile: serviceAccountPath,
+          scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+        });
+
+        sheets = google.sheets({ version: 'v4', auth });
+        console.log('✅ Google Sheets API initialized successfully with service account');
+      } catch (authError) {
+        console.error('❌ Service account authentication failed:', authError.message);
+        sheets = null;
+      }
     } else {
       console.log('ℹ️  No service account configured, using manual mode');
       sheets = null;
@@ -315,8 +553,6 @@ async function deleteDeviceFromSheet(deviceId) {
   const response = await sheets.spreadsheets.batchUpdate(request);
   return response;
 }
-
-// Step 1: Add these functions after deleteDeviceFromSheet() around line 263
 
 // ==================== ALERT HELPER FUNCTIONS ====================
 
@@ -1086,6 +1322,55 @@ app.patch('/api/admin/alerts/:alertId/toggle', requireAuth, async (req, res) => 
   }
 });
 
+// Deploy alert immediately to all targeted devices
+app.post('/api/admin/alerts/:alertId/deploy', requireAuth, async (req, res) => {
+  try {
+    const alertId = req.params.alertId;
+    
+    // Get alert details from sheet
+    const alertRows = await fetchAlertsSheet();
+    const alerts = parseAlertsData(alertRows);
+    const alert = alerts.find(a => a.alertId === alertId);
+    
+    if (!alert) {
+      return res.status(404).json({ error: 'Alert not found' });
+    }
+    
+    // Push to devices in targeted buildings
+    const buildings = alert.buildings || [];
+    let totalPushed = 0;
+    
+    for (const building of buildings) {
+      // Get devices for this building
+      const displayRows = await fetchGoogleSheet();
+      const devices = parseSheetData(displayRows);
+      const buildingDevices = devices
+        .filter(device => device.building === building)
+        .map(device => device.deviceId);
+      
+      if (buildingDevices.length > 0) {
+        const results = pushToDevices(buildingDevices, {
+          type: 'alert',
+          alertId: alertId,
+          slideId: alert.slideId,
+          priority: alert.priority
+        });
+        totalPushed += results.filter(r => r.success).length;
+      }
+    }
+    
+    res.json({ 
+      success: true, 
+      devicesNotified: totalPushed,
+      buildings: buildings,
+      alertId: alertId
+    });
+  } catch (error) {
+    console.error('Error deploying alert:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ==================== END ALERT API ROUTES ====================
 
 // Simple test route
@@ -1128,6 +1413,7 @@ app.get('/test', (req, res) => {
         <p><a href="/api/device-config/test-device">Test Device Config</a></p>
         <p><a href="/?deviceId=test-device">Digital Display</a></p>
         <p><a href="/admin">Admin Interface</a></p>
+        <p><a href="/api/admin/sse/status">SSE Status</a></p>
       </body>
     </html>
   `);
@@ -1147,7 +1433,9 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    sseConnections: connectedDevices.size,
+    connectedDevices: getConnectedDevices()
   });
 });
 
@@ -1184,6 +1472,7 @@ app.listen(port, '0.0.0.0', async () => {
   console.log(`⚙️  Admin interface: http://sign.orono.k12.mn.us:${port}/admin`);
   console.log(`🏠 Homepage: http://sign.orono.k12.mn.us:${port}`);
   console.log(`🔐 Login URL: http://sign.orono.k12.mn.us:${port}/auth/google`);
+  console.log(`📡 SSE endpoint: http://sign.orono.k12.mn.us:${port}/api/device/{deviceId}/events`);
 
   // Initialize Google Sheets API
   await initializeGoogleSheets();

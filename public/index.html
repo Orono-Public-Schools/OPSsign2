@@ -36,6 +36,13 @@
                     template: 'standard',
                     theme: 'default'
                 };
+                
+                // SSE properties
+                this.eventSource = null;
+                this.reconnectAttempts = 0;
+                this.maxReconnectAttempts = 5;
+                this.reconnectDelay = 1000;
+                
                 this.init();
             }
 
@@ -49,6 +56,14 @@
 
                 // Load device configuration
                 await this.loadDeviceConfig();
+                
+                // Start SSE connection after configuration is loaded
+                if (this.config.deviceId && this.config.deviceId !== 'unknown') {
+                    console.log('🔌 Starting SSE connection...');
+                    this.initializeEventStream();
+                } else {
+                    console.log('⚠️  No valid device ID, skipping SSE connection');
+                }
             }
 
             async loadDeviceConfig() {
@@ -88,8 +103,6 @@
                 }
             }
 
-            // REPLACE the existing applyConfiguration method in public/index.html with this version:
-
             async applyConfiguration() {
                 try {
                     console.log('Applying configuration:', this.config);
@@ -104,7 +117,7 @@
                         this.loadTheme(this.config.theme);
                     }
 
-                    // NEW: Check for active alerts first
+                    // Check for active alerts first
                     const activeAlert = this.getHighestPriorityAlert();
 
                     if (activeAlert) {
@@ -137,8 +150,6 @@
                     this.showError(`Configuration Error: ${error.message}`);
                 }
             }
-
-            // ADD these new methods to the DigitalSignage class (after the applyConfiguration method):
 
             getHighestPriorityAlert() {
                 if (!this.config.alerts || this.config.alerts.length === 0) {
@@ -175,12 +186,12 @@
 
                 alertBanner.style.display = 'block';
                 alertBanner.innerHTML = `
-        <div class="alert-content">
-            <span class="alert-icon">🚨</span>
-            <span class="alert-text">${alert.name}</span>
-            <span class="alert-priority priority-${alert.priority}">${alert.priority.toUpperCase()}</span>
-        </div>
-    `;
+                    <div class="alert-content">
+                        <span class="alert-icon">🚨</span>
+                        <span class="alert-text">${alert.name}</span>
+                        <span class="alert-priority priority-${alert.priority}">${alert.priority.toUpperCase()}</span>
+                    </div>
+                `;
                 alertBanner.className = `alert-banner priority-${alert.priority}`;
 
                 // Add pulsing animation for high priority alerts
@@ -201,6 +212,263 @@
                 // Remove body padding
                 document.body.style.paddingTop = '0';
             }
+
+            // ==================== SSE IMPLEMENTATION ====================
+
+            initializeEventStream() {
+                if (!this.config.deviceId || this.config.deviceId === 'unknown') {
+                    console.log('❌ Cannot establish SSE: Invalid device ID');
+                    return;
+                }
+
+                const eventSourceUrl = `/api/device/${this.config.deviceId}/events`;
+                console.log(`🔌 Connecting to SSE: ${eventSourceUrl}`);
+                
+                // Clean up existing connection if any
+                if (this.eventSource) {
+                    this.eventSource.close();
+                }
+                
+                this.eventSource = new EventSource(eventSourceUrl);
+                
+                this.eventSource.onopen = (event) => {
+                    console.log('✅ SSE connection established successfully');
+                    this.reconnectAttempts = 0;
+                    this.reconnectDelay = 1000; // Reset delay
+                    
+                    // Show connection status in UI
+                    this.showConnectionStatus('SSE Connected', 'success');
+                };
+                
+                this.eventSource.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('📨 Received server update:', data);
+                        this.handleServerUpdate(data);
+                    } catch (err) {
+                        console.error('❌ Failed to parse SSE message:', err);
+                    }
+                };
+                
+                this.eventSource.onerror = (error) => {
+                    console.log('❌ SSE connection error:', error);
+                    this.showConnectionStatus('SSE Disconnected', 'error');
+                    this.handleSSEReconnect();
+                };
+            }
+
+            handleServerUpdate(data) {
+                console.log(`📨 Processing update type: ${data.type}`);
+                
+                switch (data.type) {
+                    case 'connected':
+                        console.log('✅ SSE connection confirmed by server');
+                        break;
+                        
+                    case 'refresh':
+                        console.log('🔄 Server requested configuration refresh');
+                        this.handleRefreshCommand(data);
+                        break;
+                        
+                    case 'alert':
+                        console.log('🚨 Alert update received');
+                        this.handleAlertUpdate(data);
+                        break;
+                        
+                    case 'config_update':
+                        console.log('⚙️ Configuration update received');
+                        this.handleConfigUpdate(data);
+                        break;
+                        
+                    case 'template_change':
+                        console.log('🎨 Template change requested');
+                        this.handleTemplateChange(data);
+                        break;
+                        
+                    case 'test':
+                        console.log('🧪 Test message received:', data.message);
+                        this.showNotification(`Test: ${data.message}`, 'info');
+                        break;
+                        
+                    default:
+                        console.log('❓ Unknown update type:', data.type, data);
+                }
+            }
+
+            handleRefreshCommand(data) {
+                console.log('🔄 Executing server-requested refresh...');
+                
+                // Show notification that refresh was triggered by server
+                this.showNotification('Refreshing content (server request)', 'info');
+                
+                // Reload configuration instead of full page refresh for better UX
+                this.loadDeviceConfig();
+            }
+
+            handleAlertUpdate(data) {
+                console.log('🚨 Processing alert update:', data);
+                
+                // Force refresh to get latest alert configuration
+                this.showNotification('Alert update received', 'warning');
+                this.loadDeviceConfig();
+            }
+
+            handleConfigUpdate(data) {
+                console.log('⚙️ Applying configuration update:', data);
+                
+                let needsRefresh = false;
+                
+                // Update slide ID if changed
+                if (data.slideId && data.slideId !== this.config.slideId) {
+                    console.log(`📊 Updating slide ID: ${this.config.slideId} → ${data.slideId}`);
+                    this.config.slideId = data.slideId;
+                    this.initializeSlide(data.slideId);
+                    needsRefresh = true;
+                }
+                
+                // Update template if changed
+                if (data.template && data.template !== this.config.template) {
+                    console.log(`🎨 Updating template: ${this.config.template} → ${data.template}`);
+                    this.config.template = data.template;
+                    this.loadTemplate(data.template);
+                    needsRefresh = true;
+                }
+                
+                if (needsRefresh) {
+                    this.showNotification('Configuration updated', 'success');
+                }
+            }
+
+            handleTemplateChange(data) {
+                if (data.template && data.template !== this.config.template) {
+                    console.log(`🎨 Changing template: ${this.config.template} → ${data.template}`);
+                    this.config.template = data.template;
+                    this.showNotification(`Switching to ${data.template} template`, 'info');
+                    this.loadTemplate(data.template);
+                }
+            }
+
+            handleSSEReconnect() {
+                if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                    this.reconnectAttempts++;
+                    
+                    // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                    this.reconnectDelay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 30000);
+                    
+                    console.log(`🔄 Attempting SSE reconnection in ${this.reconnectDelay}ms (attempt ${this.reconnectAttempts})`);
+                    
+                    setTimeout(() => {
+                        if (this.eventSource) {
+                            this.eventSource.close();
+                        }
+                        this.initializeEventStream();
+                    }, this.reconnectDelay);
+                } else {
+                    console.log('❌ Max SSE reconnection attempts reached, giving up');
+                    this.showConnectionStatus('SSE Failed', 'error');
+                    
+                    // Fall back to regular polling interval as backup
+                    console.log('🔄 Falling back to regular refresh interval');
+                }
+            }
+
+            showConnectionStatus(status, type) {
+                // Create or update connection status indicator
+                let statusElement = document.getElementById('connection-status');
+                if (!statusElement) {
+                    statusElement = document.createElement('div');
+                    statusElement.id = 'connection-status';
+                    statusElement.style.cssText = `
+                        position: fixed;
+                        top: 10px;
+                        right: 10px;
+                        padding: 8px 12px;
+                        border-radius: 4px;
+                        font-size: 12px;
+                        font-weight: bold;
+                        z-index: 10000;
+                        transition: all 0.3s ease;
+                    `;
+                    document.body.appendChild(statusElement);
+                }
+                
+                // Style based on connection type
+                const colors = {
+                    success: { bg: '#4CAF50', text: 'white' },
+                    error: { bg: '#f44336', text: 'white' },
+                    warning: { bg: '#ff9800', text: 'white' },
+                    info: { bg: '#2196F3', text: 'white' }
+                };
+                
+                const color = colors[type] || colors.info;
+                statusElement.style.backgroundColor = color.bg;
+                statusElement.style.color = color.text;
+                statusElement.textContent = status;
+                
+                // Auto-hide success messages after 3 seconds
+                if (type === 'success') {
+                    setTimeout(() => {
+                        if (statusElement && statusElement.textContent === status) {
+                            statusElement.style.opacity = '0';
+                            setTimeout(() => {
+                                if (statusElement && statusElement.style.opacity === '0') {
+                                    statusElement.remove();
+                                }
+                            }, 300);
+                        }
+                    }, 3000);
+                }
+            }
+
+            showNotification(message, type = 'info') {
+                console.log(`🔔 Notification: ${message}`);
+                
+                // Create notification element
+                const notification = document.createElement('div');
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 50px;
+                    right: 10px;
+                    padding: 12px 16px;
+                    border-radius: 4px;
+                    font-size: 14px;
+                    max-width: 300px;
+                    z-index: 10001;
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                    transition: all 0.3s ease;
+                `;
+                
+                // Style based on type
+                const colors = {
+                    success: { bg: '#4CAF50', text: 'white' },
+                    error: { bg: '#f44336', text: 'white' },
+                    warning: { bg: '#ff9800', text: 'white' },
+                    info: { bg: '#2196F3', text: 'white' }
+                };
+                
+                const color = colors[type] || colors.info;
+                notification.style.backgroundColor = color.bg;
+                notification.style.color = color.text;
+                notification.textContent = message;
+                
+                document.body.appendChild(notification);
+                
+                // Remove after 5 seconds
+                setTimeout(() => {
+                    notification.style.opacity = '0';
+                    setTimeout(() => notification.remove(), 300);
+                }, 5000);
+            }
+
+            cleanup() {
+                if (this.eventSource) {
+                    console.log('🧹 Cleaning up SSE connection');
+                    this.eventSource.close();
+                    this.eventSource = null;
+                }
+            }
+
+            // ==================== END SSE IMPLEMENTATION ====================
 
             async loadTemplate(templateName) {
                 try {
@@ -324,9 +592,21 @@
 
         // Initialize digital signage when page loads
         console.log('DOM loaded, creating DigitalSignage instance...');
+        let digitalSignageInstance = null;
+        
         document.addEventListener('DOMContentLoaded', () => {
             console.log('DOMContentLoaded event fired');
-            new DigitalSignage();
+            digitalSignageInstance = new DigitalSignage();
+            
+            // Store reference globally for cleanup
+            window.opsignDisplay = digitalSignageInstance;
+        });
+
+        // Add cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (digitalSignageInstance) {
+                digitalSignageInstance.cleanup();
+            }
         });
     </script>
 </body>
