@@ -133,3 +133,54 @@ body.alert-mode #slideContainer {
     width: 100vw;
     height: 100vh;
 }
+
+.dynamic-alert-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 2rem;
+    box-sizing: border-box;
+    color: white;
+    background-color: #2c3e50;
+    font-family: sans-serif;
+}
+.srp-icon {
+    font-size: 5rem;
+    font-weight: bold;
+    padding: 2rem 4rem;
+    border-radius: 1rem;
+    margin-bottom: 2rem;
+}
+.custom-icon {
+    font-size: 8rem;
+    margin-bottom: 1rem;
+}
+.alert-content h1 {
+    font-size: 6rem;
+    margin: 0;
+    text-transform: uppercase;
+}
+.alert-body h2 {
+    font-size: 3rem;
+    margin: 1rem 0;
+    font-weight: normal;
+}
+.alert-body p {
+    font-size: 2rem;
+}
+.srp-lockdown { background-color: #c0392b; }
+.srp-secure { background-color: #2980b9; }
+.srp-hold { background-color: #f39c12; }
+.srp-evacuate { background-color: #27ae60; }
+.srp-shelter { background-color: #8e44ad; }
+.srp-image-icon {
+    height: 8rem;
+    width: auto;
+    max-width: 80%;
+    margin-bottom: 1rem;
+    object-fit: contain; /* Ensures the icon isn't stretched */
+}

@@ -1674,14 +1674,33 @@ app.post('/api/admin/alerts', requireAuthWithPermissions, async (req, res) => {
     const newAlert = req.body;
     console.log('Alert add requested by:', req.user.emails[0].value, newAlert);
 
-    // Validate required fields
-    if (!newAlert.name || !newAlert.slideId || !newAlert.buildings || newAlert.buildings.length === 0) {
+    // --- Enhanced Validation ---
+    if (!newAlert.name || !newAlert.buildings || newAlert.buildings.length === 0) {
       return res.status(400).json({
         error: 'Missing required fields',
-        message: 'Alert name, slide ID, and at least one building are required'
+        message: 'Alert name and at least one building are required.'
       });
     }
 
+    switch (newAlert.type) {
+      case 'slide':
+        if (!newAlert.slideId) {
+          return res.status(400).json({ error: 'Missing required fields', message: 'Google Slide ID is required for this alert type.' });
+        }
+        break;
+      case 'custom':
+        if (!newAlert.title || !newAlert.text) {
+          return res.status(400).json({ error: 'Missing required fields', message: 'Title and Message Body are required for a custom alert.' });
+        }
+        break;
+      case 'srp':
+        if (!newAlert.srpAction) {
+          return res.status(400).json({ error: 'Missing required fields', message: 'A Standard Response Protocol action is required.' });
+        }
+        break;
+      default:
+        return res.status(400).json({ error: 'Invalid alert type', message: `Unknown alert type: ${newAlert.type}` });
+    }
     // Validate user can access all specified buildings
     const invalidBuildings = newAlert.buildings.filter(building => 
       !canAccessBuilding(req.userPermissions, building)
@@ -1750,6 +1769,20 @@ app.put('/api/admin/alerts/:alertId', requireAuthWithPermissions, async (req, re
       });
     }
 
+    // --- Enhanced Validation for updates ---
+    if (updates.type) {
+      switch (updates.type) {
+        case 'slide':
+          if (!updates.slideId) return res.status(400).json({ error: 'Missing required fields', message: 'Google Slide ID is required.' });
+          break;
+        case 'custom':
+          if (!updates.title || !updates.text) return res.status(400).json({ error: 'Missing required fields', message: 'Title and Text are required.' });
+          break;
+        case 'srp':
+          if (!updates.srpAction) return res.status(400).json({ error: 'Missing required fields', message: 'SRP Action is required.' });
+          break;
+      }
+    }
     // Get existing alert to check current buildings
     const alertRows = await fetchAlertsSheet();
     const allAlerts = parseAllAlertsDataForAdmin(alertRows);

@@ -369,6 +369,14 @@ class AdminInterface {
             const priority = alert.priority || 'Low';
             const priorityLower = priority.toLowerCase();
 
+            // New: Determine alert type for display
+            let alertTypeDisplay = 'Google Slide';
+            if (alert.type === 'custom') {
+                alertTypeDisplay = `Custom: ${alert.title || ''}`;
+            } else if (alert.type === 'srp') {
+                alertTypeDisplay = `SRP: ${alert.srpAction || 'Alert'}`;
+            }
+
             const card = document.createElement('div');
             card.className = `alert-card priority-${priorityLower}`;
 
@@ -391,6 +399,7 @@ class AdminInterface {
                         <div class="alert-priority priority-${priorityLower}">
                             ${priorityIcon} ${priority}
                         </div>
+                        <div class="alert-type">${alertTypeDisplay}</div>
                     </div>
                     <div class="alert-status ${alert.active ? 'active' : 'inactive'}">${alert.active ? '●' : '○'}</div>
                 </div>
@@ -682,10 +691,40 @@ class AdminInterface {
         // Uncheck all building checkboxes
         const checkboxes = document.querySelectorAll('input[name="buildings"]');
         checkboxes.forEach(cb => cb.checked = false);
+
+        // New: Set default alert type and show correct fields
+        document.getElementById('alertType').value = 'srp';
+        this.toggleAlertFields('srp');
         
         document.getElementById('alertModal').classList.add('show');
     }
     
+
+    toggleAlertFields(type) {
+        const fieldsets = ['custom', 'srp', 'slide'];
+        const slideIdInput = document.getElementById('alertSlideId');
+        const alertTitleInput = document.getElementById('alertTitle');
+        const alertTextInput = document.getElementById('alertText');
+        const srpActionInput = document.getElementById('srpAction');
+
+        // Hide all fieldsets
+        fieldsets.forEach(id => {
+            const el = document.getElementById(`alert-fields-${id}`);
+            if (el) el.style.display = 'none';
+        });
+
+        // Show the selected one
+        const selectedEl = document.getElementById(`alert-fields-${type}`);
+        if (selectedEl) selectedEl.style.display = 'block';
+
+        // Toggle required attributes for validation.
+        // The server does the final validation, but this helps the user.
+        if (slideIdInput) slideIdInput.required = (type === 'slide');
+        if (alertTitleInput) alertTitleInput.required = (type === 'custom');
+        if (alertTextInput) alertTextInput.required = (type === 'custom');
+        if (srpActionInput) srpActionInput.required = (type === 'srp');
+    }
+
     editAlert(alertId) {
         const alert = this.alerts.find(a => a.alertId === alertId);
         if (!alert) {
@@ -698,13 +737,29 @@ class AdminInterface {
         document.getElementById('alertModalTitle').textContent = 'Edit Alert';
         document.getElementById('saveAlertBtn').textContent = 'Update Alert';
         
-        // Populate form
-        // Note: alert.active is now a boolean from the server
+        // Populate common fields
         document.getElementById('alertName').value = alert.name;
-        document.getElementById('alertSlideId').value = alert.slideId;
         document.getElementById('priority').value = alert.priority;
         document.getElementById('expires').value = alert.expires || '';
         document.getElementById('alertActive').checked = alert.active;
+
+
+        // New: handle alert type
+        const alertType = alert.type || 'slide'; // Default to slide for old alerts
+        document.getElementById('alertType').value = alertType;
+        this.toggleAlertFields(alertType);
+
+        // Populate type-specific fields
+        if (alertType === 'slide') {
+            document.getElementById('alertSlideId').value = alert.slideId || '';
+        } else if (alertType === 'custom') {
+            document.getElementById('alertTitle').value = alert.title || '';
+            document.getElementById('alertText').value = alert.text || '';
+            document.getElementById('alertIcon').value = alert.icon || 'none';
+        } else if (alertType === 'srp') {
+            document.getElementById('srpAction').value = alert.srpAction || 'Hold';
+            document.getElementById('srpText').value = alert.text || '';
+        }
         
         // Set building checkboxes
         // The 'buildings' property should already be an array from the server
@@ -897,16 +952,29 @@ document.addEventListener('DOMContentLoaded', function() {
         e.preventDefault();
         
         const formData = new FormData(e.target);
+        const type = formData.get('type');
+
         const data = {
+            type: type,
             name: formData.get('name'),
-            slideId: formData.get('slideId'),
             priority: formData.get('priority'),
             expires: formData.get('expires'),
             active: formData.has('active'),
-            // Get selected buildings and add them to the data object as an array
             buildings: Array.from(document.querySelectorAll('input[name="buildings"]:checked')).map(cb => cb.value)
         };
-        
+
+        // Add type-specific data
+        if (type === 'slide') {
+            data.slideId = formData.get('slideId');
+        } else if (type === 'custom') {
+            data.title = formData.get('title');
+            data.text = formData.get('text');
+            data.icon = formData.get('icon');
+        } else if (type === 'srp') {
+            data.srpAction = formData.get('srpAction');
+            data.text = document.getElementById('srpText').value; // Get from the correct textarea
+        }
+
         adminInterface.saveAlert(data);
     });
     
@@ -929,6 +997,14 @@ document.addEventListener('DOMContentLoaded', function() {
             validationTimeout = setTimeout(() => {
                 adminInterface.updateSlideIdFromUrl();
             }, 500); // Validate after 500ms of no typing
+        });
+    }
+
+    // Add event listener for alert type change
+    const alertTypeSelect = document.getElementById('alertType');
+    if (alertTypeSelect) {
+        alertTypeSelect.addEventListener('change', (e) => {
+            adminInterface.toggleAlertFields(e.target.value);
         });
     }
 

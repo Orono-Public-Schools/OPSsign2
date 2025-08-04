@@ -242,16 +242,67 @@
                 <span id="closeAlertModalBtn" class="modal-close">&times;</span>
             </div>
             <form id="alertForm">
-                <div class="form-row">
+                <div class="form-group">
+                    <label for="alertName">Alert Name</label>
+                    <input type="text" id="alertName" name="name" required placeholder="e.g., Weather Delay - 2 Hour Late Start">
+                </div>
+                <div class="form-group">
+                    <label for="alertType">Alert Type</label>
+                    <select id="alertType" name="type" required>
+                        <option value="srp">Standard Response Protocol</option>
+                        <option value="custom">Custom Message</option>
+                        <option value="slide">Google Slide</option>
+                    </select>
+                </div>
+
+                <!-- Fields for SRP -->
+                <div id="alert-fields-srp" class="alert-fields">
                     <div class="form-group">
-                        <label for="alertName">Alert Name</label>
-                        <input type="text" id="alertName" name="name" required placeholder="e.g., Weather Delay - 2 Hour Late Start">
+                        <label for="srpAction">Action</label>
+                        <select id="srpAction" name="srpAction">
+                            <option value="Hold">Hold - "In Your Room or Area"</option>
+                            <option value="Secure">Secure - "Get Inside. Lock Outside Doors."</option>
+                            <option value="Lockdown">Lockdown - "Locks, Lights, Out of Sight"</option>
+                            <option value="Evacuate">Evacuate - "To a Location"</option>
+                            <option value="Shelter">Shelter - "For a Hazard"</option>
+                        </select>
                     </div>
                     <div class="form-group">
-                        <label for="alertSlideId">Google Slides ID</label>
-                        <input type="text" id="alertSlideId" name="slideId" required placeholder="Google Slides ID for this alert">
+                        <label for="srpText">Additional Instructions (Optional)</label>
+                        <textarea id="srpText" name="text" rows="3" placeholder="e.g., Evacuate to the football field. This text will appear below the main SRP message."></textarea>
                     </div>
                 </div>
+
+                <!-- Fields for Custom Message -->
+                <div id="alert-fields-custom" class="alert-fields" style="display: none;">
+                    <div class="form-group">
+                        <label for="alertTitle">Title</label>
+                        <input type="text" id="alertTitle" name="title" placeholder="e.g., Important Announcement">
+                    </div>
+                    <div class="form-group">
+                        <label for="alertText">Message Body</label>
+                        <textarea id="alertText" name="text" rows="4" placeholder="Enter the full alert message here."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="alertIcon">Icon</label>
+                        <select id="alertIcon" name="icon">
+                            <option value="none">No Icon</option>
+                            <option value="exclamation-triangle">⚠️ Exclamation Triangle</option>
+                            <option value="info-circle">ℹ️ Info Circle</option>
+                            <option value="check-circle">✅ Check Circle</option>
+                            <option value="times-circle">❌ Canceled/Closed</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Fields for Google Slide -->
+                <div id="alert-fields-slide" class="alert-fields" style="display: none;">
+                    <div class="form-group">
+                        <label for="alertSlideId">Google Slides ID</label>
+                        <input type="text" id="alertSlideId" name="slideId" placeholder="Google Slides ID for this alert">
+                    </div>
+                </div>
+                
                 <div class="form-row">
                     <div class="form-group">
                         <label for="priority">Priority Level</label>

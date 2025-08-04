@@ -100,11 +100,20 @@
                     // Check for active alerts first
                     const activeAlert = this.getHighestPriorityAlert();
 
-                    if (activeAlert) { // An alert is active, switch to full-screen alert mode
-                        console.log(`🚨 ALERT ACTIVE: ${activeAlert.name}. Switching to full-screen alert view.`);
-                        // Alerts override any custom template.
+                    if (activeAlert) { // An alert is active
+                        console.log(`🚨 ALERT ACTIVE: ${activeAlert.name}, Type: ${activeAlert.type || 'slide'}`);
                         this.setAlertUIMode(true);
-                        this.initializeSlide(activeAlert.slideId);
+
+                        const alertType = activeAlert.type || 'slide'; // Default to slide for old alerts
+
+                        if (alertType === 'slide' && activeAlert.slideId) {
+                            this.initializeSlide(activeAlert.slideId);
+                        } else if (alertType === 'custom' || alertType === 'srp') {
+                            this.renderDynamicAlert(activeAlert);
+                        } else {
+                            console.warn('Alert is active but misconfigured (unknown type or missing slideId). Displaying error.');
+                            this.showError(`Alert "${activeAlert.name}" is not configured correctly.`);
+                        }
                     } else {
                         // NO ALERT: Proceed with normal template/slide logic.
                         this.setAlertUIMode(false);
@@ -437,6 +446,59 @@
             }
 
             // ==================== END SSE IMPLEMENTATION ====================
+
+            renderDynamicAlert(alert) {
+                const slideContainer = document.getElementById('slideContainer');
+                if (!slideContainer) {
+                    console.error('Slide container not found for dynamic alert');
+                    return;
+                }
+
+                let title = '';
+                let bodyHtml = '';
+                let iconHtml = '';
+                let containerClass = 'dynamic-alert-container';
+
+                // Data for different alert types
+                const srpInfo = {
+                    'Hold': { title: 'HOLD', subtitle: 'In Your Room or Area', cssClass: 'srp-hold', icon: 'srp-hold.png' },
+                    'Secure': { title: 'SECURE', subtitle: 'Get Inside. Lock Outside Doors.', cssClass: 'srp-secure', icon: 'srp-secure.png' },
+                    'Lockdown': { title: 'LOCKDOWN', subtitle: 'Locks, Lights, Out of Sight', cssClass: 'srp-lockdown', icon: 'srp-lockdown.png' },
+                    'Evacuate': { title: 'EVACUATE', subtitle: 'To a Location', cssClass: 'srp-evacuate', icon: 'srp-evacuate.png' },
+                    'Shelter': { title: 'SHELTER', subtitle: 'For a Hazard', cssClass: 'srp-shelter', icon: 'srp-shelter.png' }
+                };
+
+                const customIcons = {
+                    'exclamation-triangle': '⚠️',
+                    'info-circle': 'ℹ️',
+                    'check-circle': '✅',
+                    'times-circle': '❌'
+                };
+
+                if (alert.type === 'srp' && srpInfo[alert.srpAction]) {
+                    const srp = srpInfo[alert.srpAction];
+                    containerClass += ` ${srp.cssClass}`;
+                    title = srp.title;
+                    bodyHtml = `<h2>${srp.subtitle}</h2>`;
+                    if (alert.text) {
+                        bodyHtml += `<p class="srp-instructions">${alert.text}</p>`;
+                    }
+                    if (srp.icon) {
+                        iconHtml = `<img src="/assets/srp/${srp.icon}" alt="${srp.title} Icon" class="srp-image-icon">`;
+                    }
+                } else { // 'custom' or fallback
+                    containerClass += ' custom-alert';
+                    title = alert.title || 'Alert';
+                    bodyHtml = `<p>${alert.text || ''}</p>`;
+                    if (alert.icon && customIcons[alert.icon]) {
+                        iconHtml = `<div class="custom-icon">${customIcons[alert.icon]}</div>`;
+                    }
+                }
+
+                slideContainer.innerHTML = `
+                    <div class="${containerClass}">${iconHtml}<div class="alert-content"><h1>${title}</h1><div class="alert-body">${bodyHtml}</div></div></div>
+                `;
+            }
 
             async loadTemplate(templateName) {
                 try {
