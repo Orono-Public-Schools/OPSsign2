@@ -142,22 +142,6 @@
             font-family: monospace;
         }
 
-        /* Minimal device info overlay (optional - can be removed for true full-screen) */
-        .device-overlay {
-            position: fixed;
-            bottom: 10px;
-            right: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            opacity: 0;
-            transition: opacity 0.3s;
-            z-index: 1000;
-            pointer-events: none;
-        }
-
         /* Show overlay on hover (for debugging) */
         body:hover .device-overlay {
             opacity: 1;
@@ -190,29 +174,11 @@
         </div>
     </div>
 
-    <!-- Optional minimal device info overlay -->
-    <div class="device-overlay" id="deviceOverlay">
-        {DEVICE_ID} | Updated: <span id="updateTime">Loading...</span>
-    </div>
-
     <script>
-        // Update timestamp
-        function updateTimestamp() {
-            const now = new Date();
-            const timeString = now.toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-            document.getElementById('updateTime').textContent = timeString;
-        }
-
-        // Template initialization
+         // Template initialization
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Full-screen slideshow template loaded');
-            
-            // Update timestamp
-            updateTimestamp();
-            
+                      
             // Check if we have a slideId
             const urlParams = new URLSearchParams(window.location.search);
             const slideId = urlParams.get('slideId');
@@ -348,10 +314,6 @@
         window.addEventListener('resize', () => {
             setTimeout(adjustIframeForScreen, 100);
         });
-
-        // Optional: Hide device overlay completely for true full-screen
-        // Uncomment the next line to remove the device info overlay entirely
-        // document.getElementById('deviceOverlay').style.display = 'none';
 
         // Prevent any scrolling
         document.addEventListener('scroll', function(e) {

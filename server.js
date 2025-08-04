@@ -14,6 +14,26 @@ const port = process.env.PORT || 3000;
 const deviceStatuses = new Map();
 const deviceIPs = new Map();
 
+// Building Groups Configuration
+const BUILDING_GROUPS = {
+  'SE': 'sign-se@orono.k12.mn.us',
+  'IS': 'sign-is@orono.k12.mn.us', 
+  'MS': 'sign-ms@orono.k12.mn.us',
+  'HS': 'sign-hs@orono.k12.mn.us',
+  'DC': 'sign-dc@orono.k12.mn.us',
+  'DO': 'sign-do@orono.k12.mn.us'
+};
+
+const ADMIN_GROUP = 'sign-admin@orono.k12.mn.us';
+
+// Cache for group memberships (15 minute TTL)
+const groupMembershipCache = new Map();
+const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+
+  console.log('✅ Google Groups permissions integration loaded');
+  console.log('📋 Building groups configured:', Object.keys(BUILDING_GROUPS).join(', '));
+  console.log('👑 Admin group:', ADMIN_GROUP);
+
 // SSE Connection Management
 const connectedDevices = new Map(); // deviceId -> { response, connectedAt, lastPing }
 
@@ -69,37 +89,118 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // Authentication middleware
-function requireAuth(req, res, next) {
-  console.log('Auth check - isAuthenticated:', req.isAuthenticated());
-  if (req.user) {
-    console.log('User:', req.user.emails[0].value);
+/**
+ * Enhanced authentication middleware with building permissions
+ */
+async function requireAuthWithPermissions(req, res, next) {
+  console.log('Auth check with permissions - isAuthenticated:', req.isAuthenticated());
+  
+  if (!req.isAuthenticated()) {
+    console.log('User not authenticated, showing login page');
+    req.session.returnTo = req.originalUrl;
+    
+    return res.send(`
+      <html>
+        <head><title>OPSsign2 Login</title></head>
+        <body style="font-family: Arial; text-align: center; margin-top: 100px;">
+          <h1>OPSsign2 Admin Login</h1>
+          <p>Please sign in with your Orono Public Schools account</p>
+          <a href="/auth/google" style="background: #4285f4; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+            Sign in with Google
+          </a>
+          <br><br>
+          <a href="/" style="color: #666;">← Back to Homepage</a>
+        </body>
+      </html>
+    `);
   }
 
-  if (req.isAuthenticated()) {
-    return next();
+  try {
+    // Get user's building permissions
+    const userEmail = req.user.emails[0].value;
+    req.userPermissions = await getUserBuildingPermissions(userEmail);
+    
+    // Check if user has any signage access
+    if (req.userPermissions.level === 'none') {
+      console.log(`❌ Access denied for ${userEmail} - not in any signage group`);
+      return res.status(403).send(`
+        <html>
+          <head><title>Access Denied</title></head>
+          <body style="font-family: Arial; text-align: center; margin-top: 100px;">
+            <h1>Access Denied</h1>
+            <p>You must be a member of a digital signage group to access this interface.</p>
+            <p>Please contact your IT administrator to request access.</p>
+            <p>Your email: <strong>${userEmail}</strong></p>
+            <br>
+            <a href="/auth/logout" style="color: #666;">← Logout</a>
+          </body>
+        </html>
+      `);
+    }
+
+    console.log(`✅ Access granted: ${userEmail} (${req.userPermissions.level} level, buildings: ${req.userPermissions.buildings.join(', ')})`);
+    next();
+  } catch (error) {
+    console.error('Permission check error:', error);
+    res.status(500).json({ error: 'Authentication error' });
   }
-
-  console.log('User not authenticated, showing login page');
-
-  // Remember where they were trying to go
-  req.session.returnTo = req.originalUrl;
-
-  // Instead of direct redirect, show a login page
-  res.send(`
-    <html>
-      <head><title>OPSsign2 Login</title></head>
-      <body style="font-family: Arial; text-align: center; margin-top: 100px;">
-        <h1>OPSsign2 Admin Login</h1>
-        <p>Please sign in with your Orono Public Schools account</p>
-        <a href="/auth/google" style="background: #4285f4; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
-          Sign in with Google
-        </a>
-        <br><br>
-        <a href="/" style="color: #666;">← Back to Homepage</a>
-      </body>
-    </html>
-  `);
 }
+
+/**
+ * Filter devices based on user's building permissions
+ */
+function filterDevicesByPermissions(devices, userPermissions) {
+  if (userPermissions.level === 'district') {
+    return devices; // District admin sees all
+  }
+  
+  return devices.filter(device => 
+    userPermissions.buildings.includes(device.building)
+  );
+}
+
+/**
+ * Filter alerts based on user's building permissions
+ */
+function filterAlertsByPermissions(alerts, userPermissions) {
+  if (userPermissions.level === 'district') {
+    return alerts; // District admin sees all
+  }
+  
+  // For building-level admins, show alerts that target any of their buildings
+  // OR alerts that are for everyone (i.e., have no specific buildings assigned).
+  return alerts.filter(alert => {
+    const alertBuildings = Array.isArray(alert.buildings) ? alert.buildings : [];
+
+    // If an alert has no buildings, it's considered global and should be seen by everyone.
+    if (alertBuildings.length === 0) {
+      return true;
+    }
+
+    // Otherwise, check if the user has access to at least one of the alert's target buildings.
+    return alertBuildings.some(buildingCode =>
+      userPermissions.buildings.includes(buildingCode)
+    );
+  });
+}
+
+/**
+ * Check if user can access a specific building
+ */
+function canAccessBuilding(userPermissions, building) {
+  return userPermissions.buildings.includes(building);
+}
+
+// Clear group membership cache periodically (every hour)
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of groupMembershipCache.entries()) {
+    if (now - value.timestamp > CACHE_TTL) {
+      groupMembershipCache.delete(key);
+    }
+  }
+}, 60 * 60 * 1000); // 1 hour
+
 
 // Authentication routes
 app.get('/auth/google',
@@ -270,7 +371,7 @@ function getConnectionInfo() {
 // ==================== SSE ADMIN API ROUTES ====================
 
 // SSE status endpoint for admin
-app.get('/api/admin/sse/status', requireAuth, (req, res) => {
+app.get('/api/admin/sse/status', requireAuthWithPermissions, (req, res) => {
   res.json({
     connectedDevices: getConnectedDevices(),
     totalConnections: connectedDevices.size,
@@ -279,7 +380,7 @@ app.get('/api/admin/sse/status', requireAuth, (req, res) => {
 });
 
 // Test push to specific device
-app.post('/api/admin/sse/test-push/:deviceId', requireAuth, (req, res) => {
+app.post('/api/admin/sse/test-push/:deviceId', requireAuthWithPermissions, (req, res) => {
   const deviceId = req.params.deviceId;
   const success = pushToDevice(deviceId, {
     type: 'test',
@@ -295,7 +396,7 @@ app.post('/api/admin/sse/test-push/:deviceId', requireAuth, (req, res) => {
 });
 
 // Test push to all devices
-app.post('/api/admin/sse/test-push-all', requireAuth, (req, res) => {
+app.post('/api/admin/sse/test-push-all', requireAuthWithPermissions, (req, res) => {
   const results = pushToAllDevices({
     type: 'test',
     message: 'This is a test push to all devices from admin interface',
@@ -310,8 +411,27 @@ app.post('/api/admin/sse/test-push-all', requireAuth, (req, res) => {
   });
 });
 
+// Push refresh to a single device
+app.post('/api/admin/push/refresh-one/:deviceId', requireAuthWithPermissions, (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const success = pushToDevice(deviceId, { type: 'refresh' });
+    
+    res.json({
+      success,
+      message: success 
+        ? `Refresh signal sent to ${deviceId}` 
+        : `Device ${deviceId} not connected via SSE.`
+    });
+
+  } catch (error) {
+    console.error(`Error pushing refresh to ${req.params.deviceId}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Push refresh to specific devices
-app.post('/api/admin/push/refresh', requireAuth, (req, res) => {
+app.post('/api/admin/push/refresh', requireAuthWithPermissions, (req, res) => {
   try {
     const { deviceIds } = req.body;
     const results = pushToDevices(deviceIds, { type: 'refresh' });
@@ -328,7 +448,7 @@ app.post('/api/admin/push/refresh', requireAuth, (req, res) => {
 });
 
 // Push refresh to all devices
-app.post('/api/admin/push/refresh-all', requireAuth, (req, res) => {
+app.post('/api/admin/push/refresh-all', requireAuthWithPermissions, (req, res) => {
   try {
     const results = pushToAllDevices({ type: 'refresh' });
     res.json({ 
@@ -394,10 +514,26 @@ async function initializeGoogleSheets() {
 }
 
 async function fetchGoogleSheet() {
-  const apiKey = process.env.GOOGLE_API_KEY;
   const sheetId = process.env.GOOGLE_SHEET_ID;
   const sheetName = 'Displays';  // Keep this for now
 
+  // If service account is available, use it for an authenticated read to avoid caching delays.
+  if (sheets) {
+    try {
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range: sheetName,
+      });
+      return response.data.values || [];
+    } catch (error) {
+      console.error(`Authenticated read for '${sheetName}' failed, falling back to public API. Error: ${error.message}`);
+      // Fallback to public API key if authenticated read fails for some reason
+    }
+  }
+
+  // Fallback to public API key
+  console.log(`Falling back to public API key for reading '${sheetName}' sheet.`);
+  const apiKey = process.env.GOOGLE_API_KEY;
   const response = await axios.get(
     `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${sheetName}?key=${apiKey}`
   );
@@ -418,23 +554,24 @@ async function addDeviceToSheet(deviceData) {
   const nextRow = currentData.length + 1;
 
   // Prepare the row data in the correct order - UPDATED to include building
+  // IMPORTANT: This assumes a fixed column order in your Google Sheet.
   const rowData = [
-    deviceData.deviceId,              // Column A
-    deviceData.ipAddress || '',       // Column B
-    deviceData.location || '',        // Column C
-    deviceData.template || 'standard', // Column D
-    deviceData.theme || 'default',    // Column E
-    deviceData.slideId || '',         // Column F 
-    deviceData.refreshInterval || 15, // Column G 
-    deviceData.coordinates || '',     // Column H
-    deviceData.notes || '',           // Column I
-    deviceData.building || ''         // Column J - NEW!
+    deviceData.deviceId,              // A: deviceId
+    deviceData.ipAddress || '',       // B: ipAddress
+    deviceData.location || '',        // C: location
+    deviceData.template || 'standard', // D: template
+    deviceData.theme || 'default',    // E: theme
+    deviceData.slideId || '',         // F: slideId
+    deviceData.refreshInterval || 15, // G: refreshInterval
+    deviceData.coordinates || '',     // H: coordinates
+    deviceData.notes || '',           // I: notes
+    deviceData.building || '',        // J: building
+    deviceData.name || ''             // K: displayname
   ];
 
-  // Add the new row - UPDATED range to include Column J
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${nextRow}:J${nextRow}`, // Changed from I to J
+    range: `${sheetName}!A${nextRow}:K${nextRow}`,
     valueInputOption: 'RAW',
     resource: {
       values: [rowData]
@@ -476,23 +613,24 @@ async function updateDeviceInSheet(deviceId, deviceData) {
   }
 
   // Prepare the updated row data - UPDATED to include building
+  // IMPORTANT: This assumes a fixed column order in your Google Sheet.
   const rowData = [
-    deviceData.deviceId,              // Column A
-    deviceData.ipAddress || '',       // Column B
-    deviceData.location || '',        // Column C
-    deviceData.template || 'standard', // Column D
-    deviceData.theme || 'default',    // Column E
-    deviceData.slideId || '',         // Column F
-    deviceData.refreshInterval || 15, // Column G
-    deviceData.coordinates || '',     // Column H
-    deviceData.notes || '',           // Column I
-    deviceData.building || ''         // Column J - NEW!
+    deviceData.deviceId,              // A: deviceId
+    deviceData.ipAddress || '',       // B: ipAddress
+    deviceData.location || '',        // C: location
+    deviceData.template || 'standard', // D: template
+    deviceData.theme || 'default',    // E: theme
+    deviceData.slideId || '',         // F: slideId
+    deviceData.refreshInterval || 15, // G: refreshInterval
+    deviceData.coordinates || '',     // H: coordinates
+    deviceData.notes || '',           // I: notes
+    deviceData.building || '',        // J: building
+    deviceData.name || ''             // K: displayname
   ];
 
-  // Update the row - UPDATED range to include Column J
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${targetRow}:J${targetRow}`, // Changed from I to J
+    range: `${sheetName}!A${targetRow}:K${targetRow}`,
     valueInputOption: 'RAW',
     resource: {
       values: [rowData]
@@ -533,6 +671,14 @@ async function deleteDeviceFromSheet(deviceId) {
     throw new Error(`Device ${deviceId} not found in sheet`);
   }
 
+  // Dynamically find the sheetId (gid) to make deletion robust
+  const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === sheetName);
+  if (!sheet) {
+    throw new Error(`Sheet with name "${sheetName}" not found.`);
+  }
+  const gid = sheet.properties.sheetId;
+
   // Delete the row
   const request = {
     spreadsheetId: sheetId,
@@ -540,7 +686,7 @@ async function deleteDeviceFromSheet(deviceId) {
       requests: [{
         deleteDimension: {
           range: {
-            sheetId: 0, // Assuming first sheet
+            sheetId: gid, // Use dynamic GID
             dimension: 'ROWS',
             startIndex: targetRow,
             endIndex: targetRow + 1
@@ -558,19 +704,32 @@ async function deleteDeviceFromSheet(deviceId) {
 
 // Fetch alerts from Google Sheets
 async function fetchAlertsSheet() {
-  const apiKey = process.env.GOOGLE_API_KEY;
   const sheetId = process.env.GOOGLE_SHEET_ID;
   const sheetName = 'Alerts';
 
-  try {
-    const response = await axios.get(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${sheetName}?key=${apiKey}`
-    );
-    return response.data.values || [];
-  } catch (error) {
-    console.log('Alerts sheet not found or empty, continuing without alerts');
-    return [];
+  // If service account is available, use it for an authenticated read to avoid caching delays.
+  if (sheets) {
+    try {
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range: sheetName,
+      });
+      return response.data.values || [];
+    } catch (error) {
+      console.error(`Authenticated read for '${sheetName}' failed, falling back to public API. Error: ${error.message}`);
+      // Fallback to public API key if authenticated read fails for some reason
+    }
   }
+
+  // If service account fails or isn't configured, fall back to public API key.
+  // This will now throw an error if the sheet is not found or not public, which is
+  // the desired behavior for the admin panel to report issues correctly.
+  console.log(`Falling back to public API key for reading '${sheetName}' sheet.`);
+  const apiKey = process.env.GOOGLE_API_KEY;
+  const response = await axios.get(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${sheetName}?key=${apiKey}`
+  );
+  return response.data.values || [];
 }
 
 // Parse alerts data and filter for active alerts
@@ -588,6 +747,13 @@ function parseAlertsData(rows) {
       alert[header] = row[index] || '';
     });
 
+    // Normalize alertId vs alertID from sheet to ensure consistency for client-side code.
+    // This handles cases where the sheet header might be 'alertID'.
+    if (alert.alertID && !alert.alertId) {
+      alert.alertId = alert.alertID;
+      delete alert.alertID;
+    }
+
     // Only include active alerts that haven't expired
     if (alert.active === 'TRUE' || alert.active === true) {
       // Check expiration
@@ -599,8 +765,9 @@ function parseAlertsData(rows) {
       }
 
       // Parse buildings into an array
-      if (alert.buildings) {
-        alert.buildings = alert.buildings.split(',').map(b => b.trim());
+      if (alert.buildings && typeof alert.buildings === 'string') {
+        // Split and filter out any empty strings that result from trailing commas etc.
+        alert.buildings = alert.buildings.split(',').map(b => b.trim()).filter(Boolean);
       } else {
         alert.buildings = [];
       }
@@ -612,16 +779,62 @@ function parseAlertsData(rows) {
   return alerts;
 }
 
+// Parse all alerts for the admin interface (does not filter by active/expired)
+function parseAllAlertsDataForAdmin(rows) {
+  if (!rows || rows.length < 2) return [];
+
+  const headers = rows[0];
+  const alerts = [];
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.length === 0) continue; // Skip empty rows
+
+    const alert = {};
+    headers.forEach((header, index) => {
+      alert[header] = row[index] || '';
+    });
+
+    // Normalize alertId vs alertID from sheet to ensure consistency
+    if (alert.alertID && !alert.alertId) {
+      alert.alertId = alert.alertID;
+      delete alert.alertID;
+    }
+
+    // A row is considered a potential alert if it has a name OR an ID.
+    // This is very lenient to ensure all potentially valid data is shown in the admin UI.
+    if (alert.name || alert.alertId) {
+      // Convert 'TRUE'/'FALSE' strings to booleans
+      alert.active = (alert.active === 'TRUE' || alert.active === true);
+
+      // Parse buildings into an array
+      if (alert.buildings && typeof alert.buildings === 'string') {
+        alert.buildings = alert.buildings.split(',').map(b => b.trim()).filter(Boolean);
+      } else if (!Array.isArray(alert.buildings)) {
+        alert.buildings = [];
+      }
+      alerts.push(alert);
+    }
+  }
+  return alerts;
+}
+
 // Get alerts for a specific building
 function getAlertsForBuilding(alerts, building) {
   if (!building || !alerts || alerts.length === 0) return [];
 
-  return alerts
-    .filter(alert => alert.buildings.includes(building))
-    .sort((a, b) => {
+  return alerts.filter(alert => {
+    // An alert applies if its building list is empty (global alert for all buildings)
+    // OR if its building list explicitly includes the device's building.
+    const isGlobalAlert = !alert.buildings || alert.buildings.length === 0;
+    const isTargeted = Array.isArray(alert.buildings) && alert.buildings.includes(building);
+    return isGlobalAlert || isTargeted;
+  }).sort((a, b) => {
       // Sort by priority: high > medium > low
       const priorityValues = { high: 3, medium: 2, low: 1 };
-      return (priorityValues[b.priority] || 1) - (priorityValues[a.priority] || 1);
+      const priorityA = a.priority ? a.priority.toLowerCase() : 'low';
+      const priorityB = b.priority ? b.priority.toLowerCase() : 'low';
+      return (priorityValues[priorityB] || 1) - (priorityValues[priorityA] || 1);
     });
 }
 
@@ -634,35 +847,50 @@ async function addAlertToSheet(alertData) {
   const sheetId = process.env.GOOGLE_SHEET_ID;
   const sheetName = 'Alerts';
 
-  // First, get current data to determine the next row
+  // Get headers to build the row correctly
   const currentData = await fetchAlertsSheet();
-  const nextRow = currentData.length + 1;
+  const headers = currentData[0] || [];
+
+  // Find the actual header used for alert IDs, case-insensitively.
+  // Default to 'alertId' if not found, though it should exist.
+  const alertIdHeader = headers.find(h => h.toLowerCase() === 'alertid') || 'alertId';
+
 
   // Generate alert ID
   const alertId = `alert${Date.now()}`;
 
-  // Prepare the row data
-  const rowData = [
-    alertId,                                    // Column A: alertId
-    alertData.name || '',                       // Column B: name
-    alertData.slideId || '',                    // Column C: slideId
-    alertData.buildings.join(',') || '',        // Column D: buildings (comma-separated)
-    alertData.priority || 'medium',             // Column E: priority
-    'TRUE',                                     // Column F: active (always start as active)
-    alertData.expires || ''                     // Column G: expires
-  ];
+  const defaults = {
+    priority: 'Medium',
+    active: 'TRUE',
+  };
 
-  // Add the new row
+  const fullAlertData = {
+    ...defaults,
+    ...alertData,
+    alertId,
+    buildings: Array.isArray(alertData.buildings) ? alertData.buildings.join(',') : '',
+  };
+
+  // Add the generated ID to the data object using the correct header key from the sheet.
+  fullAlertData[alertIdHeader] = alertId;
+
+  // Now, map the data to the row using the sheet's headers. This will correctly find the ID.
+
+  const rowData = headers.map(header => fullAlertData[header] || '');
+
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${nextRow}:G${nextRow}`,
+    range: sheetName, // Append to the sheet
     valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
     resource: {
       values: [rowData]
     }
   };
 
-  const response = await sheets.spreadsheets.values.update(request);
+  await sheets.spreadsheets.values.append(request);
+
+  // Return the new alert data with the standardized 'alertId' key for the client.
   return { ...alertData, alertId };
 }
 
@@ -677,8 +905,9 @@ async function updateAlertInSheet(alertId, updates) {
 
   // Get current data to find the row to update
   const currentData = await fetchAlertsSheet();
-  const headers = currentData[0];
-  const alertIdCol = headers.indexOf('alertId');
+  const headers = currentData[0] || [];
+  // Find the column index for 'alertId' case-insensitively
+  const alertIdCol = headers.findIndex(h => h.toLowerCase() === 'alertid');
 
   if (alertIdCol === -1) {
     throw new Error('alertId column not found in alerts sheet');
@@ -697,22 +926,29 @@ async function updateAlertInSheet(alertId, updates) {
     throw new Error(`Alert ${alertId} not found in sheet`);
   }
 
-  // Get current row data and update only specified fields
-  const currentRow = currentData[targetRow - 1];
-  const rowData = [
-    alertId,                                                    // Column A
-    updates.name || currentRow[1] || '',                        // Column B
-    updates.slideId || currentRow[2] || '',                     // Column C
-    updates.buildings ? updates.buildings.join(',') : (currentRow[3] || ''), // Column D
-    updates.priority || currentRow[4] || 'medium',              // Column E
-    updates.active !== undefined ? updates.active.toString().toUpperCase() : (currentRow[5] || 'TRUE'), // Column F
-    updates.expires !== undefined ? updates.expires : (currentRow[6] || '') // Column G
-  ];
+  // Get the existing row data as an object and merge with updates
+  const existingRowObject = {};
+  headers.forEach((header, index) => {
+    existingRowObject[header] = currentData[targetRow - 1][index] || '';
+  });
+
+  // Prepare updates, ensuring correct types
+  const processedUpdates = { ...updates };
+  if (processedUpdates.buildings && Array.isArray(processedUpdates.buildings)) {
+    processedUpdates.buildings = processedUpdates.buildings.join(',');
+  }
+  if (processedUpdates.active !== undefined) {
+    processedUpdates.active = String(processedUpdates.active).toUpperCase();
+  }
+
+  const updatedData = { ...existingRowObject, ...processedUpdates };
+  const rowData = headers.map(header => updatedData[header] || '');
 
   // Update the row
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${targetRow}:G${targetRow}`,
+    // Dynamically calculate the range based on number of headers
+    range: `${sheetName}!A${targetRow}:${String.fromCharCode(65 + headers.length - 1)}${targetRow}`,
     valueInputOption: 'RAW',
     resource: {
       values: [rowData]
@@ -735,7 +971,8 @@ async function deleteAlertFromSheet(alertId) {
   // Get current data to find the row to delete
   const currentData = await fetchAlertsSheet();
   const headers = currentData[0];
-  const alertIdCol = headers.indexOf('alertId');
+  // Find the column index for 'alertId' case-insensitively
+  const alertIdCol = headers.findIndex(h => h.toLowerCase() === 'alertid');
 
   if (alertIdCol === -1) {
     throw new Error('alertId column not found in alerts sheet');
@@ -754,14 +991,22 @@ async function deleteAlertFromSheet(alertId) {
     throw new Error(`Alert ${alertId} not found in sheet`);
   }
 
-  // Delete the row - Note: sheetId 1 assumes Alerts is the second sheet
+  // Dynamically find the sheetId (gid) to make deletion robust
+  const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === sheetName);
+  if (!sheet) {
+    throw new Error(`Sheet with name "${sheetName}" not found.`);
+  }
+  const gid = sheet.properties.sheetId;
+
+  // Delete the row
   const request = {
     spreadsheetId: sheetId,
     resource: {
       requests: [{
         deleteDimension: {
           range: {
-            sheetId: 1, // Assuming Alerts is the second sheet (index 1)
+            sheetId: gid, // Use dynamic GID
             dimension: 'ROWS',
             startIndex: targetRow,
             endIndex: targetRow + 1
@@ -776,6 +1021,183 @@ async function deleteAlertFromSheet(alertId) {
 }
 
 // ==================== END ALERT FUNCTIONS ====================
+
+/**
+ * Get user's building permissions by checking Google Group memberships
+ */
+async function getUserBuildingPermissions(userEmail) {
+  console.log(`🔍 Debug: Checking permissions for ${userEmail}`);
+  const cacheKey = userEmail;
+  const cached = groupMembershipCache.get(cacheKey);
+  
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    console.log(`🔍 Debug: Using cached permissions for ${userEmail}`);
+    return cached.permissions;
+  }
+
+  try {
+  console.log(`🔍 Debug: Initializing JWT authentication for domain-wide delegation...`);
+  
+  // Use JWT authentication directly
+  const { JWT } = require('google-auth-library');
+  const serviceAccount = require('./service-account-key.json');
+
+  const jwtClient = new JWT({
+    email: serviceAccount.client_email,
+    key: serviceAccount.private_key,
+    scopes: [
+      'https://www.googleapis.com/auth/admin.directory.group.member.readonly'
+    ],
+    subject: 'jason.woyak@orono.k12.mn.us'
+  });
+
+  await jwtClient.authorize();
+  console.log(`✅ Debug: JWT client authorized successfully`);
+
+  const directory = google.admin({ version: 'directory_v1', auth: jwtClient });
+  console.log(`🔍 Debug: Directory API initialized, checking admin group...`);
+
+    // Check if user is district admin first
+    try {
+      console.log(`🔍 Debug: Checking if ${userEmail} is in admin group: ${ADMIN_GROUP}`);
+      const adminResult = await directory.members.get({
+        groupKey: ADMIN_GROUP,
+        memberKey: userEmail
+      });
+      console.log(`✅ Debug: User IS in admin group!`, adminResult.data);
+      
+      // User is district admin - has access to all buildings
+      const permissions = {
+        level: 'district',
+        buildings: ['SE', 'IS', 'MS', 'HS', 'DC', 'DO'],
+        isAdmin: true
+      };
+      
+      groupMembershipCache.set(cacheKey, {
+        permissions,
+        timestamp: Date.now()
+      });
+      
+      console.log(`✅ District admin access granted for: ${userEmail}`);
+      return permissions;
+    } catch (adminCheckError) {
+      console.log(`🔍 Debug: User NOT in admin group. Error:`, adminCheckError.message);
+      // User is not in admin group, check building-specific groups
+    }
+
+    const userBuildings = []
+
+    // Check building-specific group memberships
+    for (const [buildingCode, groupEmail] of Object.entries(BUILDING_GROUPS)) {
+      try {
+        console.log(`🔍 Debug: Checking if ${userEmail} is in ${buildingCode} group: ${groupEmail}`);
+        const memberResult = await directory.members.get({
+          groupKey: groupEmail,
+          memberKey: userEmail
+        });
+        console.log(`✅ Debug: User IS in ${buildingCode} group!`);
+        userBuildings.push(buildingCode);
+      } catch (memberCheckError) {
+        console.log(`🔍 Debug: User NOT in ${buildingCode} group. Error:`, memberCheckError.message);
+      }
+    }
+
+    const permissions = userBuildings.length > 0 
+      ? {
+          level: 'building',
+          buildings: userBuildings,
+          isAdmin: false
+        }
+      : {
+          level: 'none',
+          buildings: [],
+          isAdmin: false
+        };
+
+    // Cache the result
+    groupMembershipCache.set(cacheKey, {
+      permissions,
+      timestamp: Date.now()
+    });
+
+    if (permissions.level === 'building') {
+      console.log(`✅ Building admin access granted: ${userEmail} -> ${userBuildings.join(', ')}`);
+    } else {
+      console.log(`❌ No signage group access for: ${userEmail}`);
+    }
+
+    return permissions;
+
+  } catch (error) {
+    console.error('Error checking group memberships:', error);
+    
+    // Return no access on error, but log for debugging
+    console.log(`⚠️  Falling back to no access for ${userEmail} due to error`);
+    return {
+      level: 'none',
+      buildings: [],
+      isAdmin: false
+    };
+  }
+}
+
+/**
+ * Extract Google Slides presentation ID from various URL formats
+ */
+function extractSlideIdFromUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  
+  const trimmedUrl = url.trim();
+  if (!trimmedUrl) return null;
+  
+  // Handle different Google Slides URL formats
+  const patterns = [
+    /\/presentation\/d\/([a-zA-Z0-9-_]+)/,
+    /\/presentation\/d\/([a-zA-Z0-9-_]+)\/edit/,
+    /\/presentation\/d\/([a-zA-Z0-9-_]+)\/preview/,
+    /\/presentation\/d\/([a-zA-Z0-9-_]+)\/embed/
+  ];
+  
+  for (const pattern of patterns) {
+    const match = trimmedUrl.match(pattern);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  
+  // If it looks like it's already just a presentation ID, return as-is
+  if (/^[a-zA-Z0-9-_]{20,}$/.test(trimmedUrl)) {
+    return trimmedUrl;
+  }
+  
+  return null;
+}
+
+/**
+ * Process device configuration, converting presentation links to slide IDs
+ */
+function processDeviceConfig(rawConfig) {
+    const config = { ...rawConfig };
+
+    // 1. Prioritize a directly provided slideId.
+    //    Clean it up in case it's a full URL pasted into the slideId field.
+    if (config.slideId && config.slideId.includes('docs.google.com')) {
+        const extractedId = extractSlideIdFromUrl(config.slideId);
+        if (extractedId) {
+            config.slideId = extractedId;
+        }
+    }
+
+    // 2. If no slideId, try to derive it from presentationLink.
+    if (!config.slideId && config.presentationLink) {
+        const extractedId = extractSlideIdFromUrl(config.presentationLink);
+        if (extractedId) {
+            config.slideId = extractedId;
+        }
+    }
+
+    return config;
+}
 
 // Ping monitoring functions
 async function checkDeviceStatus(deviceId, ipAddress) {
@@ -851,6 +1273,9 @@ function parseSheetData(rows) {
       device[header] = row[index] || '';
     });
 
+    // Normalize the display name. Prefer 'displayname', fall back to 'deviceId'.
+    device.name = device.displayname || device.name || device.deviceId;
+
     // Get status from ping monitoring
     const pingStatus = deviceStatuses.get(device.deviceId);
     device.status = pingStatus ? pingStatus.status : 'unknown';
@@ -881,6 +1306,12 @@ app.get('/', (req, res) => {
   // If deviceId is provided, show the digital signage display
   if (deviceId) {
     console.log(`Serving digital signage for device: ${deviceId}`);
+        
+    // Set cache-control headers to ensure the browser always loads the latest
+    // version of the application's HTML and JavaScript logic.
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
     return;
   }
@@ -904,6 +1335,12 @@ app.get('/', (req, res) => {
 
 // Device configuration API (UPDATED to include alerts)
 app.get('/api/device-config/:deviceId', async (req, res) => {
+  // Set cache-control headers to ensure the client always gets the latest config.
+  // This prevents the browser from using a stale, cached version of the data.
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   try {
     const deviceId = req.params.deviceId;
 
@@ -927,10 +1364,13 @@ app.get('/api/device-config/:deviceId', async (req, res) => {
     const alerts = parseAlertsData(alertRows);
 
     // Find device configuration
-    const deviceConfig = devices.find(device => device.deviceId === deviceId);
-
-    if (deviceConfig) {
-      console.log(`Configuration found for device: ${deviceId}`);
+    const rawDeviceConfig = devices.find(device => device.deviceId === deviceId);
+    
+    if (rawDeviceConfig) {
+      console.log(`Raw configuration found for device: ${deviceId}`);
+      
+      // Process the configuration to handle slide IDs from URLs
+      const deviceConfig = processDeviceConfig(rawDeviceConfig);
       
       // Get alerts for this device's building
       const deviceAlerts = getAlertsForBuilding(alerts, deviceConfig.building);
@@ -938,7 +1378,7 @@ app.get('/api/device-config/:deviceId', async (req, res) => {
       // Add alerts to the device configuration
       deviceConfig.alerts = deviceAlerts;
       
-      console.log(`Found ${deviceAlerts.length} alerts for building: ${deviceConfig.building}`);
+      console.log(`Found ${deviceAlerts.length} alerts for building: ${deviceConfig.building}, slideId: ${deviceConfig.slideId}`);
       
       res.json(deviceConfig);
     } else {
@@ -981,16 +1421,17 @@ app.get('/api/device-config/:deviceId', async (req, res) => {
 });
 
 // API route to get current user info
-app.get('/api/user', requireAuth, (req, res) => {
+app.get('/api/user', requireAuthWithPermissions, (req, res) => {
   res.json({
     name: req.user.displayName,
     email: req.user.emails[0].value,
-    photo: req.user.photos[0].value
+    photo: req.user.photos[0].value,
+    permissions: req.userPermissions
   });
 });
 
 // Test admin authentication
-app.get('/api/admin/test', requireAuth, (req, res) => {
+app.get('/api/admin/test', requireAuthWithPermissions, (req, res) => {
   res.json({
     message: 'Admin authentication working',
     user: req.user.emails[0].value,
@@ -1009,57 +1450,63 @@ app.get('/debug/session', (req, res) => {
 });
 
 // Admin routes
-app.get('/admin', requireAuth, (req, res) => {
+app.get('/admin', requireAuthWithPermissions, (req, res) => {
   console.log('Admin route accessed by:', req.user.emails[0].value);
   res.sendFile(path.join(__dirname, 'admin', 'index.html'));
 });
 
 // Admin API routes
-app.get('/api/admin/devices', requireAuth, async (req, res) => {
+app.get('/api/admin/devices', requireAuthWithPermissions, async (req, res) => {
   try {
-    console.log('Admin devices request received');
+    console.log('Admin devices request from:', req.user.emails[0].value);
 
-    // Fetch real data from Google Sheets
     const rows = await fetchGoogleSheet();
-    console.log('Google Sheets rows fetched:', rows.length);
-
-    const devices = parseSheetData(rows);
-    console.log(`Parsed ${devices.length} devices from Google Sheets`);
-
-    res.json(devices);
+    const allDevices = parseSheetData(rows);
+    
+    // Filter devices based on user's permissions
+    const filteredDevices = filterDevicesByPermissions(allDevices, req.userPermissions);
+    
+    console.log(`Returning ${filteredDevices.length} of ${allDevices.length} devices for user's buildings: ${req.userPermissions.buildings.join(', ')}`);
+    res.json(filteredDevices);
   } catch (error) {
-    console.error('Error loading devices from Google Sheets:', error);
-
-    // Return error details for debugging
+    console.error('Error loading devices:', error);
     res.status(500).json({
       error: 'Failed to load devices from Google Sheets',
-      details: error.message,
-      timestamp: new Date().toISOString()
+      details: error.message
     });
   }
 });
 
-app.post('/api/admin/devices', requireAuth, async (req, res) => {
+app.post('/api/admin/devices', requireAuthWithPermissions, async (req, res) => {
   try {
     const newDevice = req.body;
-    console.log('Device add requested:', newDevice);
+    console.log('Device add requested by:', req.user.emails[0].value, newDevice);
+
+    // Validate user can access the specified building
+    if (newDevice.building && !canAccessBuilding(req.userPermissions, newDevice.building)) {
+      return res.status(403).json({
+        error: 'Access denied',
+        message: `You don't have permission to manage devices in building: ${newDevice.building}`
+      });
+    }
+
+    // Process the device config (convert URLs to IDs if needed)
+    const processedDevice = processDeviceConfig(newDevice);
 
     if (sheets) {
-      // Use service account to write to Google Sheets
-      await addDeviceToSheet(newDevice);
-      console.log(`✅ Device ${newDevice.deviceId} added to Google Sheets`);
+      await addDeviceToSheet(processedDevice);
+      console.log(`✅ Device ${processedDevice.deviceId} added to Google Sheets by ${req.user.emails[0].value}`);
 
       res.json({
         success: true,
-        message: `Device "${newDevice.deviceId}" added successfully to Google Sheets!`,
-        device: newDevice
+        message: `Device "${processedDevice.deviceId}" added successfully to Google Sheets!`,
+        device: processedDevice
       });
     } else {
-      // Fallback to manual instructions
       res.json({
         success: true,
         message: 'Device configuration saved. Please add this device manually to your Google Sheet for now.',
-        device: newDevice,
+        device: processedDevice,
         requiresManualUpdate: true
       });
     }
@@ -1072,31 +1519,60 @@ app.post('/api/admin/devices', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/api/admin/devices/:deviceId', requireAuth, async (req, res) => {
+// Update device editing to include building validation:
+app.put('/api/admin/devices/:deviceId', requireAuthWithPermissions, async (req, res) => {
   try {
     const deviceId = req.params.deviceId;
     const updates = req.body;
 
-    console.log(`Device update requested for ${deviceId}:`, updates);
+    console.log(`Device update requested for ${deviceId} by:`, req.user.emails[0].value);
+
+    // Get existing device to check current building
+    const rows = await fetchGoogleSheet();
+    const allDevices = parseSheetData(rows);
+    const existingDevice = allDevices.find(d => d.deviceId === deviceId);
+    
+    if (!existingDevice) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
+
+    // Check if user can access the current building
+    if (!canAccessBuilding(req.userPermissions, existingDevice.building)) {
+      return res.status(403).json({
+        error: 'Access denied',
+        message: 'You don\'t have permission to modify this device'
+      });
+    }
+
+    // If changing building, check access to new building too
+    if (updates.building && updates.building !== existingDevice.building) {
+      if (!canAccessBuilding(req.userPermissions, updates.building)) {
+        return res.status(403).json({
+          error: 'Access denied',
+          message: `You don't have permission to move devices to building: ${updates.building}`
+        });
+      }
+    }
+
+    // Process the updates (convert URLs to IDs if needed)
+    const processedUpdates = processDeviceConfig(updates);
 
     if (sheets) {
-      // Use service account to update Google Sheets
-      await updateDeviceInSheet(deviceId, updates);
-      console.log(`✅ Device ${deviceId} updated in Google Sheets`);
+      await updateDeviceInSheet(deviceId, processedUpdates);
+      console.log(`✅ Device ${deviceId} updated in Google Sheets by ${req.user.emails[0].value}`);
 
       res.json({
         success: true,
         message: `Device "${deviceId}" updated successfully in Google Sheets!`,
         deviceId: deviceId,
-        updates: updates
+        updates: processedUpdates
       });
     } else {
-      // Fallback to manual instructions
       res.json({
         success: true,
         message: 'Device configuration updated. Please update this device manually in your Google Sheet for now.',
         deviceId: deviceId,
-        updates: updates,
+        updates: processedUpdates,
         requiresManualUpdate: true
       });
     }
@@ -1109,16 +1585,31 @@ app.put('/api/admin/devices/:deviceId', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/api/admin/devices/:deviceId', requireAuth, async (req, res) => {
+app.delete('/api/admin/devices/:deviceId', requireAuthWithPermissions, async (req, res) => {
   try {
     const deviceId = req.params.deviceId;
+    console.log(`Device delete requested for: ${deviceId} by:`, req.user.emails[0].value);
 
-    console.log(`Device delete requested for: ${deviceId}`);
+    // Get existing device to check building permission
+    const rows = await fetchGoogleSheet();
+    const allDevices = parseSheetData(rows);
+    const existingDevice = allDevices.find(d => d.deviceId === deviceId);
+    
+    if (!existingDevice) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
+
+    // Check if user can access this device's building
+    if (!canAccessBuilding(req.userPermissions, existingDevice.building)) {
+      return res.status(403).json({
+        error: 'Access denied',
+        message: 'You don\'t have permission to delete this device'
+      });
+    }
 
     if (sheets) {
-      // Use service account to delete from Google Sheets
       await deleteDeviceFromSheet(deviceId);
-      console.log(`✅ Device ${deviceId} deleted from Google Sheets`);
+      console.log(`✅ Device ${deviceId} deleted from Google Sheets by ${req.user.emails[0].value}`);
 
       res.json({
         success: true,
@@ -1126,7 +1617,6 @@ app.delete('/api/admin/devices/:deviceId', requireAuth, async (req, res) => {
         deviceId: deviceId
       });
     } else {
-      // Fallback to manual instructions
       res.json({
         success: true,
         message: 'Device marked for deletion. Please remove this device manually from your Google Sheet for now.',
@@ -1143,33 +1633,46 @@ app.delete('/api/admin/devices/:deviceId', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/admin/user-info', requireAuthWithPermissions, (req, res) => {
+  res.json({
+    user: {
+      name: req.user.displayName,
+      email: req.user.emails[0].value,
+      photo: req.user.photos[0].value
+    },
+    permissions: req.userPermissions
+  });
+});
+
 // ==================== ALERT API ROUTES ====================
 
 // Get all alerts (admin only)
-app.get('/api/admin/alerts', requireAuth, async (req, res) => {
+app.get('/api/admin/alerts', requireAuthWithPermissions, async (req, res) => {
   try {
-    console.log('Admin alerts request received');
+    console.log('Admin alerts request from:', req.user.emails[0].value);
 
     const alertRows = await fetchAlertsSheet();
-    const alerts = parseAlertsData(alertRows);
+    const allAlerts = parseAllAlertsDataForAdmin(alertRows);
+    
+    // Filter alerts based on user's permissions
+    const filteredAlerts = filterAlertsByPermissions(allAlerts, req.userPermissions);
 
-    console.log(`Found ${alerts.length} active alerts`);
-    res.json(alerts);
+    console.log(`Returning ${filteredAlerts.length} of ${allAlerts.length} alerts for user's buildings`);
+    res.json(filteredAlerts);
   } catch (error) {
-    console.error('Error loading alerts from Google Sheets:', error);
+    console.error('Error loading alerts:', error);
     res.status(500).json({
       error: 'Failed to load alerts from Google Sheets',
-      details: error.message,
-      timestamp: new Date().toISOString()
+      details: error.message
     });
   }
 });
 
 // Add new alert (admin only)
-app.post('/api/admin/alerts', requireAuth, async (req, res) => {
+app.post('/api/admin/alerts', requireAuthWithPermissions, async (req, res) => {
   try {
     const newAlert = req.body;
-    console.log('Alert add requested:', newAlert);
+    console.log('Alert add requested by:', req.user.emails[0].value, newAlert);
 
     // Validate required fields
     if (!newAlert.name || !newAlert.slideId || !newAlert.buildings || newAlert.buildings.length === 0) {
@@ -1179,20 +1682,46 @@ app.post('/api/admin/alerts', requireAuth, async (req, res) => {
       });
     }
 
+    // Validate user can access all specified buildings
+    const invalidBuildings = newAlert.buildings.filter(building => 
+      !canAccessBuilding(req.userPermissions, building)
+    );
+
+    if (invalidBuildings.length > 0) {
+      return res.status(403).json({
+        error: 'Access denied',
+        message: `You don't have permission to create alerts for buildings: ${invalidBuildings.join(', ')}`
+      });
+    }
+
+    // Process the alert config (convert URLs to IDs if needed)
+    const processedAlert = processDeviceConfig(newAlert);
+
     if (sheets) {
-      const alertWithId = await addAlertToSheet(newAlert);
-      console.log(`✅ Alert ${alertWithId.alertId} added to Google Sheets`);
+      const alertWithId = await addAlertToSheet(processedAlert);
+      console.log(`✅ Alert ${alertWithId.alertId} added to Google Sheets by ${req.user.emails[0].value}`);
 
       res.json({
         success: true,
-        message: `Alert "${newAlert.name}" added successfully!`,
+        message: `Alert "${processedAlert.name}" added successfully!`,
         alert: alertWithId
       });
+
+      // Push a refresh to affected devices
+      const displayRows = await fetchGoogleSheet();
+      const devices = parseSheetData(displayRows);
+      const targetDeviceIds = devices
+          .filter(d => processedAlert.buildings.includes(d.building))
+          .map(d => d.deviceId);
+
+      if (targetDeviceIds.length > 0) {
+          pushToDevices(targetDeviceIds, { type: 'refresh' });
+      }
     } else {
       res.json({
         success: true,
         message: 'Alert configuration saved. Please add this alert manually to your Google Sheet for now.',
-        alert: newAlert,
+        alert: processedAlert,
         requiresManualUpdate: true
       });
     }
@@ -1206,29 +1735,91 @@ app.post('/api/admin/alerts', requireAuth, async (req, res) => {
 });
 
 // Update alert (admin only)
-app.put('/api/admin/alerts/:alertId', requireAuth, async (req, res) => {
+app.put('/api/admin/alerts/:alertId', requireAuthWithPermissions, async (req, res) => {
   try {
     const alertId = req.params.alertId;
     const updates = req.body;
 
-    console.log(`Alert update requested for ${alertId}:`, updates);
+    console.log(`Alert update requested for ${alertId} by:`, req.user.emails[0].value);
+
+    // Validate required fields
+    if (updates.buildings && updates.buildings.length === 0) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'At least one building is required'
+      });
+    }
+
+    // Get existing alert to check current buildings
+    const alertRows = await fetchAlertsSheet();
+    const allAlerts = parseAllAlertsDataForAdmin(alertRows);
+    const existingAlert = allAlerts.find(a => a.alertId === alertId);
+    
+    if (!existingAlert) {
+      return res.status(404).json({ error: 'Alert not found' });
+    }
+
+    // Check if user can access the current alert's buildings
+    const currentBuildings = existingAlert.buildings || [];
+    // A district admin can always access. A building admin can access if the alert is global
+    // or if it targets one of their buildings.
+    const hasAccessToCurrent = req.userPermissions.level === 'district' ||
+                               currentBuildings.length === 0 ||
+                               currentBuildings.some(building => 
+                                 canAccessBuilding(req.userPermissions, building)
+                               );
+
+    if (!hasAccessToCurrent) {
+      return res.status(403).json({
+        error: 'Access denied',
+        message: 'You don\'t have permission to modify this alert'
+      });
+    }
+
+    // If changing buildings, validate user can access all new buildings
+    if (updates.buildings) {
+      const invalidBuildings = updates.buildings.filter(building => 
+        !canAccessBuilding(req.userPermissions, building)
+      );
+
+      if (invalidBuildings.length > 0) {
+        return res.status(403).json({
+          error: 'Access denied',
+          message: `You don't have permission to target buildings: ${invalidBuildings.join(', ')}`
+        });
+      }
+    }
+
+    // Process the updates (convert URLs to IDs if needed)
+    const processedUpdates = processDeviceConfig(updates);
 
     if (sheets) {
-      await updateAlertInSheet(alertId, updates);
-      console.log(`✅ Alert ${alertId} updated in Google Sheets`);
+      await updateAlertInSheet(alertId, processedUpdates);
+      console.log(`✅ Alert ${alertId} updated in Google Sheets by ${req.user.emails[0].value}`);
 
       res.json({
         success: true,
         message: `Alert "${alertId}" updated successfully!`,
         alertId: alertId,
-        updates: updates
+        updates: processedUpdates
       });
+
+      // Push a refresh to affected devices (both old and new buildings)
+      const affectedBuildings = new Set([...(existingAlert.buildings || []), ...(processedUpdates.buildings || [])]);
+      const displayRows = await fetchGoogleSheet();
+      const devices = parseSheetData(displayRows);
+      const targetDeviceIds = devices
+          .filter(d => affectedBuildings.has(d.building))
+          .map(d => d.deviceId);
+      if (targetDeviceIds.length > 0) {
+          pushToDevices(targetDeviceIds, { type: 'refresh' });
+      }
     } else {
       res.json({
         success: true,
         message: 'Alert configuration updated. Please update this alert manually in your Google Sheet for now.',
         alertId: alertId,
-        updates: updates,
+        updates: processedUpdates,
         requiresManualUpdate: true
       });
     }
@@ -1242,21 +1833,58 @@ app.put('/api/admin/alerts/:alertId', requireAuth, async (req, res) => {
 });
 
 // Delete alert (admin only)
-app.delete('/api/admin/alerts/:alertId', requireAuth, async (req, res) => {
+app.delete('/api/admin/alerts/:alertId', requireAuthWithPermissions, async (req, res) => {
   try {
     const alertId = req.params.alertId;
+    console.log(`Alert delete requested for: ${alertId} by:`, req.user.emails[0].value);
 
-    console.log(`Alert delete requested for: ${alertId}`);
+    // Get existing alert to check building permission
+    const alertRows = await fetchAlertsSheet();
+    const allAlerts = parseAllAlertsDataForAdmin(alertRows);
+    const existingAlert = allAlerts.find(a => a.alertId === alertId);
+    
+    if (!existingAlert) {
+      return res.status(404).json({ error: 'Alert not found' });
+    }
+
+    // Check if user can access this alert's buildings
+    const alertBuildings = existingAlert.buildings || [];
+    // A district admin can always access. A building admin can access if the alert is global
+    // or if it targets one of their buildings.
+    const hasAccess = req.userPermissions.level === 'district' ||
+                      alertBuildings.length === 0 ||
+                      alertBuildings.some(building => 
+                        canAccessBuilding(req.userPermissions, building)
+                      );
+
+    if (!hasAccess) {
+      return res.status(403).json({
+        error: 'Access denied',
+        message: 'You don\'t have permission to delete this alert'
+      });
+    }
 
     if (sheets) {
       await deleteAlertFromSheet(alertId);
-      console.log(`✅ Alert ${alertId} deleted from Google Sheets`);
+      console.log(`✅ Alert ${alertId} deleted from Google Sheets by ${req.user.emails[0].value}`);
 
       res.json({
         success: true,
-        message: `Alert "${alertId}" deleted successfully!`,
+        message: `Alert "${alertId}" deleted successfully from Google Sheets!`,
         alertId: alertId
       });
+
+      // Push a refresh to affected devices
+      if (existingAlert.buildings && existingAlert.buildings.length > 0) {
+          const displayRows = await fetchGoogleSheet();
+          const devices = parseSheetData(displayRows);
+          const targetDeviceIds = devices
+              .filter(d => existingAlert.buildings.includes(d.building))
+              .map(d => d.deviceId);
+          if (targetDeviceIds.length > 0) {
+              pushToDevices(targetDeviceIds, { type: 'refresh' });
+          }
+      }
     } else {
       res.json({
         success: true,
@@ -1275,14 +1903,14 @@ app.delete('/api/admin/alerts/:alertId', requireAuth, async (req, res) => {
 });
 
 // Toggle alert active status (quick action for admin)
-app.patch('/api/admin/alerts/:alertId/toggle', requireAuth, async (req, res) => {
+app.patch('/api/admin/alerts/:alertId/toggle', requireAuthWithPermissions, async (req, res) => {
   try {
     const alertId = req.params.alertId;
 
     // Get current alert status
     const alertRows = await fetchAlertsSheet();
-    const alerts = parseAlertsData(alertRows);
-    const currentAlert = alerts.find(alert => alert.alertId === alertId);
+    const allAlerts = parseAllAlertsDataForAdmin(alertRows);
+    const currentAlert = allAlerts.find(alert => alert.alertId === alertId);
 
     if (!currentAlert) {
       return res.status(404).json({
@@ -1292,7 +1920,7 @@ app.patch('/api/admin/alerts/:alertId/toggle', requireAuth, async (req, res) => 
     }
 
     // Toggle the active status
-    const newActiveStatus = currentAlert.active !== 'TRUE';
+    const newActiveStatus = !currentAlert.active;
 
     if (sheets) {
       await updateAlertInSheet(alertId, { active: newActiveStatus });
@@ -1304,6 +1932,18 @@ app.patch('/api/admin/alerts/:alertId/toggle', requireAuth, async (req, res) => 
         alertId: alertId,
         active: newActiveStatus
       });
+
+      // Push a refresh to affected devices
+      if (currentAlert.buildings && currentAlert.buildings.length > 0) {
+          const displayRows = await fetchGoogleSheet();
+          const devices = parseSheetData(displayRows);
+          const targetDeviceIds = devices
+              .filter(d => currentAlert.buildings.includes(d.building))
+              .map(d => d.deviceId);
+          if (targetDeviceIds.length > 0) {
+              pushToDevices(targetDeviceIds, { type: 'refresh' });
+          }
+      }
     } else {
       res.json({
         success: true,
@@ -1323,7 +1963,7 @@ app.patch('/api/admin/alerts/:alertId/toggle', requireAuth, async (req, res) => 
 });
 
 // Deploy alert immediately to all targeted devices
-app.post('/api/admin/alerts/:alertId/deploy', requireAuth, async (req, res) => {
+app.post('/api/admin/alerts/:alertId/deploy', requireAuthWithPermissions, async (req, res) => {
   try {
     const alertId = req.params.alertId;
     
@@ -1339,11 +1979,14 @@ app.post('/api/admin/alerts/:alertId/deploy', requireAuth, async (req, res) => {
     // Push to devices in targeted buildings
     const buildings = alert.buildings || [];
     let totalPushed = 0;
+
+    // Fetch device data once to avoid multiple API calls in the loop
+    const displayRows = await fetchGoogleSheet();
+    const devices = parseSheetData(displayRows);
+    
     
     for (const building of buildings) {
       // Get devices for this building
-      const displayRows = await fetchGoogleSheet();
-      const devices = parseSheetData(displayRows);
       const buildingDevices = devices
         .filter(device => device.building === building)
         .map(device => device.deviceId);
@@ -1440,8 +2083,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Serve static files AFTER all routes to prevent conflicts
-app.use('/style.css', express.static('public/style.css'));
-app.use('/assets', express.static('public/assets'));
+app.use(express.static(path.join(__dirname, 'public')));
 app.use('/themes', express.static('themes'));
 app.use('/templates', express.static('templates'));
 
@@ -1449,7 +2091,7 @@ app.use('/templates', express.static('templates'));
 app.use('/admin', (req, res, next) => {
   // If requesting the main admin page, require auth and handle specially
   if (req.path === '/' || req.path === '') {
-    return requireAuth(req, res, next);
+    return requireAuthWithPermissions(req, res, next);
   }
 
   // For static files (CSS, JS, etc.), check auth but serve files
@@ -1487,6 +2129,7 @@ app.listen(port, '0.0.0.0', async () => {
     await updateDeviceIPs(); // Refresh IP list from Google Sheets
     await pingAllDevices();  // Ping all devices
   }, 120000); // 2 minutes
+
 });
 
 module.exports = app;

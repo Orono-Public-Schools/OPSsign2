@@ -29,6 +29,26 @@ body {
     padding: 0 2rem;
 }
 
+.logo-section {
+    display: flex;
+    align-items: center;
+}
+
+.logo-link {
+    text-decoration: none;
+    color: inherit;
+    transition: opacity 0.2s;
+}
+
+.admin-logo {
+    height: 80px;
+    margin-right: 1rem;
+}
+
+.logo-section h1, .logo-section p {
+    margin: 0;
+}
+
 .logo-section h1 {
     font-size: 1.8rem;
     margin-bottom: 0.25rem;
@@ -97,9 +117,9 @@ body {
     background-color: rgba(255,255,255,0.1);
 }
 
-/* Make logo clickable */
-.logo-section a:hover {
-    opacity: 0.8;
+
+.logo-link:hover {
+    opacity: 0.9;
 }
 
 /* Main Content */

@@ -15,13 +15,6 @@
         <div class="loading">Loading presentation...</div>
     </div>
 
-    <div id="footer">
-        <div class="device-info">
-            <span id="deviceId">Device: Loading...</span>
-            <span id="lastUpdate">Updated: Loading...</span>
-        </div>
-    </div>
-
     <script>
         // Quick test to see if JavaScript is running
         console.log('JavaScript is loading...');
@@ -50,9 +43,6 @@
                 // Get device ID from URL parameter
                 const urlParams = new URLSearchParams(window.location.search);
                 this.config.deviceId = urlParams.get('deviceId') || 'unknown';
-
-                // Update device ID display
-                document.getElementById('deviceId').textContent = `Device: ${this.config.deviceId}`;
 
                 // Load device configuration
                 await this.loadDeviceConfig();
@@ -106,44 +96,46 @@
             async applyConfiguration() {
                 try {
                     console.log('Applying configuration:', this.config);
-
-                    // Load template if specified
-                    if (this.config.template && this.config.template !== 'standard') {
-                        await this.loadTemplate(this.config.template);
-                    }
-
-                    // Load theme if specified
-                    if (this.config.theme && this.config.theme !== 'default') {
-                        this.loadTheme(this.config.theme);
-                    }
-
+                    
                     // Check for active alerts first
                     const activeAlert = this.getHighestPriorityAlert();
 
-                    if (activeAlert) {
-                        console.log(`🚨 Showing alert: ${activeAlert.name} (Priority: ${activeAlert.priority}) for building: ${this.config.building}`);
-                        this.showAlertIndicator(activeAlert);
+                    if (activeAlert) { // An alert is active, switch to full-screen alert mode
+                        console.log(`🚨 ALERT ACTIVE: ${activeAlert.name}. Switching to full-screen alert view.`);
+                        // Alerts override any custom template.
+                        this.setAlertUIMode(true);
                         this.initializeSlide(activeAlert.slideId);
-                    } else if (this.config.slideId) {
-                        console.log('No alerts active, showing regular presentation');
-                        this.hideAlertIndicator();
-                        this.initializeSlide(this.config.slideId);
                     } else {
-                        this.hideAlertIndicator();
-                        // Let the template handle the no-slideId case
-                        console.log('No slideId configured - using template default content');
+                        // NO ALERT: Proceed with normal template/slide logic.
+                        this.setAlertUIMode(false);
 
-                        // For standard template, we still want to show an error
-                        if (!this.config.template || this.config.template === 'standard') {
-                            this.showError('No Google Slide ID configured for this device');
+                        // Load custom template if specified. This replaces the body's content
+                        // but preserves the running script.
+                        if (this.config.template && this.config.template !== 'standard') {
+                            await this.loadTemplate(this.config.template);
+                        }
+
+                        // After the template is loaded (or if using the standard one),
+                        // initialize the Google Slide if an ID is configured.
+                        // This allows custom templates to either use their own content
+                        // or act as a container for a standard presentation.
+                        if (this.config.slideId) {
+                            console.log(`Initializing presentation for slideId: ${this.config.slideId}`);
+                            this.initializeSlide(this.config.slideId);
                         } else {
-                            // For custom templates, let them show their default content
-                            console.log(`Template "${this.config.template}" will show default content`);
+                            console.log('No slideId configured. The template will display its default content.');
+                            // For the standard template, not having a slideId is an error.
+                            // Custom templates are allowed to function without a slideId.
+                            if (!this.config.template || this.config.template === 'standard') {
+                                this.showError('No Google Slide ID configured for this device');
+                            }
                         }
                     }
 
-                    // Update footer information
-                    this.updateFooter();
+                    // Load theme if specified (do this after all template/slide logic)
+                    if (this.config.theme && this.config.theme !== 'default') {
+                        this.loadTheme(this.config.theme);
+                    }
 
                 } catch (error) {
                     console.error('Error applying configuration:', error);
@@ -162,7 +154,11 @@
                 // Sort alerts by priority: high > medium > low
                 const priorityValues = { high: 3, medium: 2, low: 1 };
                 const sortedAlerts = this.config.alerts.sort((a, b) => {
-                    return (priorityValues[b.priority] || 1) - (priorityValues[a.priority] || 1);
+                    // Normalize priorities to lowercase for case-insensitive comparison
+                    const priorityA = a.priority ? a.priority.toLowerCase() : 'low';
+                    const priorityB = b.priority ? b.priority.toLowerCase() : 'low';
+                    
+                    return (priorityValues[priorityB] || 1) - (priorityValues[priorityA] || 1);
                 });
 
                 const topAlert = sortedAlerts[0];
@@ -170,49 +166,21 @@
                 return topAlert;
             }
 
-            showAlertIndicator(alert) {
-                console.log('Showing alert indicator for:', alert.name);
+            setAlertUIMode(isAlertActive) {
+                const header = document.getElementById('banner');
+                const body = document.body;
 
-                // Create or update alert banner
-                let alertBanner = document.getElementById('alertBanner');
-                if (!alertBanner) {
-                    alertBanner = document.createElement('div');
-                    alertBanner.id = 'alertBanner';
-                    alertBanner.className = 'alert-banner';
-
-                    // Insert at the top of the body
-                    document.body.insertBefore(alertBanner, document.body.firstChild);
+                if (isAlertActive) {
+                    console.log('Entering Alert UI Mode (full-screen)');
+                    if (header) header.style.display = 'none';
+                    body.classList.add('alert-mode');
+                } else {
+                    console.log('Exiting Alert UI Mode (returning to normal)');
+                    if (header) header.style.display = 'block';
+                    body.classList.remove('alert-mode');
                 }
-
-                alertBanner.style.display = 'block';
-                alertBanner.innerHTML = `
-                    <div class="alert-content">
-                        <span class="alert-icon">🚨</span>
-                        <span class="alert-text">${alert.name}</span>
-                        <span class="alert-priority priority-${alert.priority}">${alert.priority.toUpperCase()}</span>
-                    </div>
-                `;
-                alertBanner.className = `alert-banner priority-${alert.priority}`;
-
-                // Add pulsing animation for high priority alerts
-                if (alert.priority === 'high') {
-                    alertBanner.classList.add('alert-pulse');
-                }
-
-                // Adjust body padding to account for alert banner
-                document.body.style.paddingTop = '60px';
             }
-
-            hideAlertIndicator() {
-                const alertBanner = document.getElementById('alertBanner');
-                if (alertBanner) {
-                    alertBanner.style.display = 'none';
-                }
-
-                // Remove body padding
-                document.body.style.paddingTop = '0';
-            }
-
+            
             // ==================== SSE IMPLEMENTATION ====================
 
             initializeEventStream() {
@@ -472,33 +440,39 @@
 
             async loadTemplate(templateName) {
                 try {
+                    // Fetch the template HTML content.
                     const response = await fetch(`/templates/${templateName}/index.html.template`);
 
                     if (response.ok) {
-                        let templateHtml = await response.text();
+                        let templateText = await response.text();
 
-                        // Replace placeholders in template
-                        templateHtml = templateHtml
+                        // Replace placeholders in the fetched template HTML.
+                        templateText = templateText
                             .replace(/{LOCATION}/g, this.config.location || 'Orono Public Schools')
                             .replace(/{PRESENTATION_ID}/g, this.config.slideId || '')
                             .replace(/{DEVICE_ID}/g, this.config.deviceId)
                             .replace(/{THEME_PATH}/g, `/themes/${this.config.theme || 'default'}.css`);
 
-                        // Replace body content with template
-                        const tempDiv = document.createElement('div');
-                        tempDiv.innerHTML = templateHtml;
+                        // CRITICAL FIX: The original implementation was flawed and destroyed the running script.
+                        // This new implementation parses the template and replaces the content of the
+                        // body safely, preserving the running script.
+                        const parser = new DOMParser();
+                        const templateDoc = parser.parseFromString(templateText, 'text/html');
+                        const templateBody = templateDoc.body;
 
-                        // Preserve scripts
-                        const scripts = document.getElementsByTagName('script');
-                        const scriptContents = Array.from(scripts).map(script => script.outerHTML);
+                        // Grab the currently running script so we can preserve it.
+                        const mainScript = document.querySelector('body > script:last-of-type');
 
-                        // Replace body content
-                        document.body.innerHTML = templateHtml;
+                        // Clear the current body.
+                        document.body.innerHTML = '';
 
-                        // Re-add scripts
-                        scriptContents.forEach(scriptHtml => {
-                            document.body.insertAdjacentHTML('beforeend', scriptHtml);
-                        });
+                        // Append the content from the template's body.
+                        while (templateBody.firstChild) {
+                            document.body.appendChild(templateBody.firstChild);
+                        }
+
+                        // Re-append the main script to the new body.
+                        if (mainScript) document.body.appendChild(mainScript);
 
                         console.log(`Template "${templateName}" loaded successfully`);
                     } else {
@@ -506,8 +480,20 @@
                     }
                 } catch (error) {
                     console.error('Error loading template:', error);
-                    // Continue with default template
-                }
+                    // Show a non-blocking notification that the template failed to load
+                    this.showNotification(`Failed to load template '${templateName}'. Falling back to standard view.`, 'error');
+
+                    // Grab the currently running script so we can preserve it.
+                    const mainScript = document.querySelector('body > script:last-of-type');
+
+                    // The logic in applyConfiguration will now handle showing the standard slide,
+                    // so we just need to ensure the #slideContainer exists for it to populate.
+                    // Restore the standard body structure.
+                    document.body.innerHTML = '<div id="banner"><img src="/assets/ops-torch.png" alt="Orono Public Schools Logo"></div><div id="slideContainer"><div class="loading">Loading presentation...</div></div>';
+                    
+                    // Re-append the main script to the new body.
+                    if (mainScript) document.body.appendChild(mainScript);
+                 }
             }
 
             loadTheme(themeName) {
@@ -550,7 +536,6 @@
                 console.log('Applying default configuration');
                 this.config.slideId = '1E7v2rVGN8TabxalUlXSHE2zEhJxv0tEXiCxE3FD99Ic';
                 this.initializeSlide(this.config.slideId);
-                this.updateFooter();
             }
 
             setupRefresh() {
@@ -562,13 +547,6 @@
                     console.log('Refreshing page...');
                     window.location.reload();
                 }, refreshMinutes * 60 * 1000);
-            }
-
-            updateFooter() {
-                const lastUpdateElement = document.getElementById('lastUpdate');
-                if (lastUpdateElement) {
-                    lastUpdateElement.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
-                }
             }
 
             showError(message) {

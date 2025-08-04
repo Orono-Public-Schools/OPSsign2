@@ -37,36 +37,12 @@ body {
 
 /* Slide Container */
 #slideContainer {
-    height: 85vh;
+    flex-grow: 1;
     width: 100%;
     display: flex;
     justify-content: center;
     align-items: center;
     background-color: #f8f9fa;
-}
-
-#slideContainer iframe {
-    width: 100%;
-    height: 100%;
-    border: none;
-}
-
-/* Footer */
-#footer {
-    height: 5vh;
-    background-color: #f8f9fa;
-    border-top: 1px solid #e9ecef;
-    display: flex;
-    align-items: center;
-    padding: 0 1rem;
-    font-size: 0.8rem;
-    color: #6c757d;
-}
-
-.device-info {
-    display: flex;
-    justify-content: space-between;
-    width: 100%;
 }
 
 /* Loading State */
@@ -131,20 +107,6 @@ body {
     #banner {
         height: 8vh;
     }
-
-    #slideContainer {
-        height: 87vh;
-    }
-
-    #footer {
-        height: 5vh;
-        font-size: 0.7rem;
-    }
-
-    .device-info {
-        flex-direction: column;
-        gap: 0.25rem;
-    }
 }
 
 /* Hide scrollbars but keep functionality */
@@ -163,110 +125,11 @@ html, body {
     width: 100%;
 }
 
-/* ADD these alert banner styles to your public/style.css file */
-
-/* Alert Banner Styles */
-.alert-banner {
+/* Added to support full-screen alert mode */
+body.alert-mode #slideContainer {
     position: fixed;
     top: 0;
     left: 0;
-    right: 0;
-    z-index: 1000;
-    padding: 12px 20px;
-    text-align: center;
-    font-weight: bold;
-    font-size: 18px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-    display: none;
-}
-
-.alert-content {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 15px;
-    max-width: 1200px;
-    margin: 0 auto;
-}
-
-.alert-icon {
-    font-size: 24px;
-    animation: pulse 2s infinite;
-}
-
-.alert-text {
-    flex: 1;
-    font-size: 20px;
-    font-weight: 600;
-}
-
-.alert-priority {
-    background: rgba(255,255,255,0.25);
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-}
-
-/* Priority-based colors */
-.alert-banner.priority-high {
-    background: linear-gradient(135deg, #dc2626, #b91c1c);
-    color: white;
-}
-
-.alert-banner.priority-medium {
-    background: linear-gradient(135deg, #d97706, #b45309);
-    color: white;
-}
-
-.alert-banner.priority-low {
-    background: linear-gradient(135deg, #2563eb, #1d4ed8);
-    color: white;
-}
-
-/* Pulse animation for high priority */
-.alert-banner.priority-high {
-    animation: alertBannerPulse 3s infinite;
-}
-
-@keyframes pulse {
-    0%, 100% { 
-        transform: scale(1); 
-    }
-    50% { 
-        transform: scale(1.1); 
-    }
-}
-
-@keyframes alertBannerPulse {
-    0%, 100% { 
-        opacity: 1; 
-        transform: translateY(0); 
-    }
-    50% { 
-        opacity: 0.9; 
-        transform: translateY(-2px); 
-    }
-}
-
-/* Responsive design for smaller screens */
-@media (max-width: 768px) {
-    .alert-banner {
-        padding: 10px 15px;
-        font-size: 16px;
-    }
-    
-    .alert-content {
-        gap: 10px;
-    }
-    
-    .alert-text {
-        font-size: 16px;
-    }
-    
-    .alert-priority {
-        font-size: 12px;
-        padding: 3px 8px;
-    }
+    width: 100vw;
+    height: 100vh;
 }

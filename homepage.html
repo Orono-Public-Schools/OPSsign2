@@ -14,13 +14,26 @@
         }
         .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
         .header {
-            text-align: center;
+            display: flex;
+            align-items: center;
             color: white;
             margin-bottom: 3rem;
             padding: 2rem 0;
         }
-        .header h1 { font-size: 3rem; margin-bottom: 1rem; }
-        .header p { font-size: 1.2rem; opacity: 0.9; }
+        .header-logo {
+            height: 100px;
+            margin-right: 1.5rem;
+        }
+        .header-text h1 {
+            font-size: 3rem;
+            margin: 0;
+            line-height: 1.1;
+        }
+        .header-text p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            margin: 0;
+        }
         .cards {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -114,9 +127,11 @@
 <body>
     <div class="container">
         <div class="header">
-            <img src="/assets/ops-torch.png" alt="Orono Public Schools Logo" style="height: 60px; margin-bottom: 1rem;">
-            <h1>🏫 OPSsign2</h1>
-            <p>Digital Signage System for Orono Public Schools</p>
+            <img src="/assets/OPSsign-Torch.png" alt="Orono Public Schools Logo" class="header-logo">
+            <div class="header-text">
+                <h1>OPSsign2</h1>
+                <p>Digital Signage System for Orono Public Schools</p>
+            </div>
         </div>
 
         <div class="cards">
@@ -142,43 +157,21 @@
                 </div>
             </div>
         </div>
-
         <div class="card">
-            <h3>🥧 Raspberry Pi Setup</h3>
-            <p>Configure a new Raspberry Pi device to connect to this digital signage system:</p>
+            <h3>📚 Resources</h3>
+            <p></p>
 
-            <h4>1. Install Raspberry Pi OS and set up Wi-Fi</h4>
-
-            <h4>2. Create kiosk startup script:</h4>
-            <pre class="setup-code">#!/bin/bash
-# /home/pi/kiosk.sh
-
-# Disable screen blanking
-xset s off
-xset -dpms
-xset s noblank
-
-# Set unique device ID for this Pi
-DEVICE_ID="your-device-name"  # Change this for each Pi
-SERVER_URL="http://sign.orono.k12.mn.us:3000"
-
-# Launch browser in kiosk mode
-chromium-browser --kiosk --no-first-run --disable-infobars \
-    --disable-pinch --overscroll-history-navigation=0 \
-    "${SERVER_URL}/?deviceId=${DEVICE_ID}"</pre>
-
-            <h4>3. Make it executable</h4>
-            <pre class="setup-code">chmod +x /home/pi/kiosk.sh</pre>
-
-            <h4>4. Edit the crontab (to run at boot):</h4>
-            <pre class="setup-code">crontab -e</pre>
-
-            <h4>5. Add this line at the bottom of crontab:</h4>
-            <pre class="setup-code">@reboot sleep 30 && DISPLAY=:0 /home/pi/kiosk.sh</pre>
-
-            <h4>4. Add the device to the admin interface</h4>
-            <p>Use the admin dashboard to configure the device's display settings, assign presentations, and set refresh intervals.</p>
+            <a href="SETUP_GUIDE.md" class="btn">
+                Raspberry Pi Setup Guide
+            </a>
+            <a href="https://github.com/Orono-Public-Schools/OPSsign2" class="btn">
+                GitHub Repository
+            </a>
         </div>
+    </div>
+
+    <div class="footer">
+
     </div>
 
     <div class="footer">

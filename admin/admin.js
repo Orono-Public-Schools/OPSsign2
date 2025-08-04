@@ -1,952 +1,997 @@
-// Admin Interface JavaScript
+// Enhanced AdminInterface class with building-level permissions
+
 class AdminInterface {
     constructor() {
         this.devices = [];
         this.alerts = [];
+        this.userInfo = null;
+        this.userPermissions = null;
+        this.currentBuildingFilter = '';
         this.editingDevice = null;
         this.editingAlert = null;
-        this.init();
+        
+        this.buildingInfo = {
+            'SE': { name: 'Schumann Elementary', level: 'elementary' },
+            'IS': { name: 'Intermediate School', level: 'elementary' }, 
+            'MS': { name: 'Middle School', level: 'secondary' },
+            'HS': { name: 'High School', level: 'secondary' },
+            'DC': { name: 'Discovery Center', level: 'other' },
+            'DO': { name: 'District Office', level: 'other' }
+        };
+        
     }
 
     async init() {
-        await this.loadUserInfo();
-        await this.loadDevices();
-        await this.loadAlerts();
-        this.setupEventListeners();
-        this.updateStats();
-        this.updateAlertStats();
+        console.log('Initializing AdminInterface...');
+        
+        try {
+            // First, get user info and permissions
+            await this.loadUserInfo();
+            
+            if (!this.userPermissions || this.userPermissions.level === 'none') {
+                this.showError('Access denied. You must be a member of a signage group.');
+                return;
+            }
+
+            // Set up the interface based on permissions
+            this.setupUserInterface();
+            
+            // Load data
+            await Promise.all([
+                this.loadDevices(),
+                this.loadAlerts()
+            ]);
+            
+            this.updateStats();
+            this.hideLoading();
+            
+        } catch (error) {
+            console.error('Initialization error:', error);
+            this.showError('Failed to load admin interface. Please try again.');
+        }
     }
 
-    // Load current user information
     async loadUserInfo() {
         try {
             const response = await fetch('/api/user');
             if (response.ok) {
-                const user = await response.json();
-                document.getElementById('userName').textContent = user.name;
-                document.getElementById('userEmail').textContent = user.email;
-                document.getElementById('userPhoto').src = user.photo;
+                this.userInfo = await response.json();
+                const data = this.userInfo;
+                document.getElementById('userEmail').textContent = data.email;
+                document.getElementById('userPhoto').src = data.photo;
+                
+                // Store permissions for future use
+                this.userPermissions = data.permissions;
+                console.log('User permissions:', this.userPermissions);
+            } else {
+                throw new Error('Failed to load user info');
             }
         } catch (error) {
             console.error('Error loading user info:', error);
+            throw error;
+        }
+    }
+    
+    setupUserInterface() {
+        const userPhoto = document.getElementById('userPhoto');
+        const userName = document.getElementById('userName');
+        const userPermission = document.getElementById('userPermission');
+
+        // Populate user info in header
+        if (this.userInfo) {
+            if (userPhoto) userPhoto.src = this.userInfo.photo;
+            if (userName) userName.textContent = this.userInfo.name;
+            
+            if (this.userPermissions.level === 'district') {
+                if (userPermission) {
+                    userPermission.textContent = 'District Administrator';
+                    userPermission.className = 'user-permission admin';
+                }
+            } else {
+                const buildingNames = this.userPermissions.buildings.map(code => 
+                    this.buildingInfo[code]?.name || code
+                ).join(', ');
+                if (userPermission) {
+                    userPermission.textContent = `Building Admin: ${buildingNames}`;
+                    userPermission.className = 'user-permission building';
+                }
+            }
+        }
+
+        // Set up building filter for district admins
+        if (this.userPermissions.level === 'district' && this.userPermissions.buildings.length > 1) {
+            this.setupBuildingFilter();
+        }
+        
+        // Hide templates section for building admins
+        if (this.userPermissions.level === 'building') {
+            const templatesSection = document.querySelector('.templates-section');
+            if (templatesSection) {
+                templatesSection.style.display = 'none';
+            }
+        }
+
+        // Set up form building options
+        this.setupBuildingOptions();
+    }
+
+    setupBuildingFilter() {
+        // Check if building filter elements exist in the HTML
+        const buildingFilter = document.getElementById('buildingFilter');
+        const buildingSelect = document.getElementById('buildingSelect');
+        
+        if (!buildingFilter || !buildingSelect) {
+            console.warn('Building filter elements not found in HTML, skipping building filter setup');
+            return;
+        }
+        
+        // Only show filter if user has multiple buildings
+        if (this.userPermissions.buildings.length <= 1) {
+            console.log('User only has access to one building, no filter needed');
+            return;
+        }
+        
+        // Add options for each building the user can access
+        this.userPermissions.buildings.forEach(code => {
+            const option = document.createElement('option');
+            option.value = code;
+            option.textContent = this.buildingInfo[code]?.name || code;
+            buildingSelect.appendChild(option);
+        });
+    
+        buildingSelect.addEventListener('change', (e) => {
+            this.currentBuildingFilter = e.target.value;
+            this.filterDisplays();
+            this.filterAlerts();
+        });
+    
+        buildingFilter.style.display = 'flex';
+    }
+    
+    setupBuildingOptions() {
+        // Update device form building dropdown
+        const buildingSelect = document.getElementById('building');
+        if (buildingSelect) {
+            buildingSelect.innerHTML = '';
+    
+            // Add options only for buildings user can access
+            this.userPermissions.buildings.forEach(code => {
+                const option = document.createElement('option');
+                option.value = code;
+                option.textContent = `${code} - ${this.buildingInfo[code]?.name || code}`;
+                buildingSelect.appendChild(option);
+            });
+        } else {
+            console.warn('Building select dropdown not found');
+        }
+    
+        // Set up building selection checkboxes for alerts (if element exists)
+        const buildingSelection = document.getElementById('buildingSelection');
+        if (buildingSelection) {
+            buildingSelection.innerHTML = '';
+    
+            this.userPermissions.buildings.forEach(code => {
+                const label = document.createElement('label');
+                label.className = 'checkbox-label building-checkbox';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.name = 'buildings';
+                checkbox.value = code;
+                
+                const span = document.createElement('span');
+                span.className = 'checkmark';
+                
+                const text = document.createTextNode(`${code} - ${this.buildingInfo[code]?.name || code}`);
+                
+                label.appendChild(checkbox);
+                label.appendChild(span);
+                label.appendChild(text);
+                buildingSelection.appendChild(label);
+            });
+    
+            // Hide/show quick select buttons based on available buildings
+            this.updateQuickSelectButtons();
+        } else {
+            console.warn('Building selection checkboxes not found, skipping alert building setup');
         }
     }
 
-    // Load devices from the server
+    updateQuickSelectButtons() {
+        const elementaryBuildings = ['SE', 'IS'];
+        const secondaryBuildings = ['MS', 'HS'];
+        
+        const hasElementary = elementaryBuildings.some(code => 
+            this.userPermissions.buildings.includes(code)
+        );
+        const hasSecondary = secondaryBuildings.some(code => 
+            this.userPermissions.buildings.includes(code)
+        );
+
+        const selectElementaryBtn = document.getElementById('selectElementaryBtn');
+        if (selectElementaryBtn) selectElementaryBtn.style.display = hasElementary ? 'inline-block' : 'none';
+        
+        const selectSecondaryBtn = document.getElementById('selectSecondaryBtn');
+        if (selectSecondaryBtn) selectSecondaryBtn.style.display = hasSecondary ? 'inline-block' : 'none';
+        
+        // Hide "Select All" if user only has one building
+        const selectAllBtn = document.getElementById('selectAllBtn');
+        if (selectAllBtn) {
+            selectAllBtn.style.display = 
+                this.userPermissions.buildings.length > 1 ? 'inline-block' : 'none';
+        }
+    }
+    
     async loadDevices() {
         try {
             const response = await fetch('/api/admin/devices');
-            if (response.ok) {
-                this.devices = await response.json();
-                this.renderDevices();
-            } else {
-                throw new Error('Failed to load devices');
-            }
+            if (!response.ok) throw new Error('Failed to load devices');
+            
+            this.devices = await response.json();
+            this.renderDevices();
         } catch (error) {
             console.error('Error loading devices:', error);
             this.showError('Failed to load devices');
         }
     }
 
-    // Load alerts from the server
     async loadAlerts() {
         try {
             const response = await fetch('/api/admin/alerts');
-            if (response.ok) {
-                this.alerts = await response.json();
-                this.renderAlerts();
-            } else {
-                // Alerts might not exist yet, that's okay
-                console.log('No alerts found or alerts sheet not created yet');
-                this.alerts = [];
-                this.renderAlerts();
-            }
+            if (!response.ok) throw new Error('Failed to load alerts');
+            
+            this.alerts = await response.json();
+            this.renderAlerts();
         } catch (error) {
             console.error('Error loading alerts:', error);
-            this.alerts = [];
-            this.renderAlerts();
+            this.showError('Failed to load alerts');
         }
     }
 
-    // Render devices in the grid
+    filterDisplays() {
+        this.renderDevices();
+    }
+
+    filterAlerts() {
+        this.renderAlerts();
+    }
+
+    getFilteredDevices() {
+        let filtered = this.devices;
+        
+        // Apply building filter if set
+        if (this.currentBuildingFilter) {
+            filtered = filtered.filter(device => device.building === this.currentBuildingFilter);
+        }
+        
+        return filtered;
+    }
+
+    getFilteredAlerts() {
+        let filtered = this.alerts;
+        
+        // Apply building filter if set
+        if (this.currentBuildingFilter) {
+            filtered = filtered.filter(alert => {
+                // The server now sends `buildings` as an array, so we just need to check for inclusion.
+                return Array.isArray(alert.buildings) && alert.buildings.includes(this.currentBuildingFilter);
+            });
+        }
+        
+        return filtered;
+    }
+
     renderDevices() {
-        const grid = document.getElementById('devicesGrid');
-
-        if (this.devices.length === 0) {
-            grid.innerHTML = '<div class="loading">No devices configured yet.</div>';
+        const devicesGrid = document.getElementById('devicesGrid');
+        devicesGrid.innerHTML = ''; // Clear existing content
+        const filteredDevices = this.getFilteredDevices();
+        
+        if (filteredDevices.length === 0) {
+            const emptyState = document.createElement('div');
+            emptyState.className = 'empty-state';
+            emptyState.innerHTML = `
+                <div class="empty-icon">📺</div>
+                <h3>No displays found</h3>
+                <p>Get started by adding your first display</p>
+                <button id="addEmptyDeviceBtn" class="add-btn">Add Display</button>
+            `;
+            devicesGrid.appendChild(emptyState);
             return;
         }
 
-        grid.innerHTML = this.devices.map(device => `
-            <div class="device-card" data-device-id="${device.deviceId}">
-                <div class="device-header">
-                    <h3 class="device-title">${device.deviceId}</h3>
-                    <span class="device-status ${device.status}">
-                        ${device.status === 'online' ? '🟢' : '🔴'} ${device.status}
-                    </span>
-                </div>
-                <div class="device-detail">
-                    <span class="device-detail-label">IP Address:</span>
-                    <span class="device-detail-value">${device.ipAddress || 'Not set'}</span>
-                </div>
-                <div class="device-details">
-                    <div class="device-detail">
-                        <span class="device-detail-label">Location:</span>
-                        <span class="device-detail-value">${device.location || 'Not set'}</span>
-                    </div>
-                    <div class="device-detail">
-                        <span class="device-detail-label">Building:</span>
-                        <span class="device-detail-value">${device.building || 'Not set'}</span>
-                    </div>
-                    <div class="device-detail">
-                        <span class="device-detail-label">Template:</span>
-                        <span class="device-detail-value">${device.template || 'standard'}</span>
-                    </div>
-                    <div class="device-detail">
-                        <span class="device-detail-label">Theme:</span>
-                        <span class="device-detail-value">${device.theme || 'default'}</span>
-                    </div>
-                    <div class="device-detail">
-                        <span class="device-detail-label">Refresh:</span>
-                        <span class="device-detail-value">${device.refreshInterval || 15} min</span>
-                    </div>
-                    <div class="device-detail">
-                        <span class="device-detail-label">Last Seen:</span>
-                        <span class="device-detail-value">${this.formatDate(device.lastSeen)}</span>
-                    </div>
-                </div>
+        filteredDevices.forEach(device => {
+            const card = document.createElement('div');
+            card.className = 'device-card';
 
-                <div class="device-actions">
-                        <button class="btn btn-secondary btn-small" onclick="admin.previewDevice('${device.deviceId}')">
-                            👁️ Preview
-                        </button>
-                        <button class="btn btn-info btn-small" onclick="admin.pushRefreshToDevice('${device.deviceId}')">
-                            📡 Push Refresh
-                        </button>
-                        <button class="btn btn-secondary btn-small" onclick="editDeviceClick('${device.deviceId}')">
-                            ✏️ Edit
-                        </button>
-                        <button class="btn btn-danger btn-small" onclick="admin.deleteDevice('${device.deviceId}')">
-                            🗑️ Delete
-                        </button>
+            // Helper function to create info rows
+            const createInfo = (label, value, valueClass = '') => {
+                const info = document.createElement('div');
+                info.className = 'device-info';
+                info.innerHTML = `
+                    <span class="info-label">${label}:</span>
+                    <span class="info-value ${valueClass}">${value}</span>
+                `;
+                return info;
+            };
+
+            card.innerHTML = `
+                <div class="device-header">
+                    <div class="device-title">
+                        <h3></h3>
+                        <div class="device-building"></div>
+                    </div>
+                    <div class="device-status ${device.active ? 'active' : 'inactive'}">${device.active ? '●' : '○'}</div>
                 </div>
-            </div>
-        `).join('');
+                <div class="device-details"></div>
+                <div class="device-actions">
+                    <button class="edit-btn" data-action="edit" data-id="${device.deviceId}">Edit</button>
+                    <button class="delete-btn" data-action="delete" data-id="${device.deviceId}">Delete</button>
+                    <button class="refresh-btn" data-action="push-refresh" data-id="${device.deviceId}" title="Push Refresh via SSE">📡</button>
+                    <button class="view-btn" data-action="view" data-id="${device.deviceId}">View</button>
+                </div>
+            `;
+
+            // Safely set text content
+            card.querySelector('h3').textContent = device.name;
+            card.querySelector('.device-building').textContent = `${device.deviceId} • ${device.building} - ${this.buildingInfo[device.building]?.name || device.building}`;
+
+            const details = card.querySelector('.device-details');
+            details.appendChild(createInfo('ID', device.deviceId));
+            details.appendChild(createInfo('Location', device.location || 'Not specified'));
+            details.appendChild(createInfo('Template', device.template, `template-${device.template}`));
+            details.appendChild(createInfo('Slides', device.slideId ? '✅ Configured' : '⚪ None'));
+
+            devicesGrid.appendChild(card);
+        });
     }
 
-    // Render alerts in the grid
     renderAlerts() {
-        const grid = document.getElementById('alertsGrid');
-
-        if (this.alerts.length === 0) {
-            grid.innerHTML = '<div class="loading">No alerts configured yet.</div>';
+        const alertsGrid = document.getElementById('alertsGrid');
+        alertsGrid.innerHTML = ''; // Clear existing content
+        const filteredAlerts = this.getFilteredAlerts();
+        
+        if (filteredAlerts.length === 0) {
+            const emptyState = document.createElement('div');
+            emptyState.className = 'empty-state';
+            emptyState.innerHTML = `
+                <div class="empty-icon">🚨</div>
+                <h3>No alerts found</h3>
+                <p>Create alerts to broadcast important information</p>
+                <button id="addEmptyAlertBtn" class="add-btn">Create Alert</button>
+            `;
+            alertsGrid.appendChild(emptyState);
             return;
         }
 
-        grid.innerHTML = this.alerts.map(alert => `
-            <div class="alert-card priority-${alert.priority}" data-alert-id="${alert.alertId}">
-                <div class="alert-header">
-                    <h3 class="alert-title">${alert.name}</h3>
-                    <div class="alert-status-row">
-                        <span class="priority-badge ${alert.priority}">${alert.priority.toUpperCase()}</span>
-                        <span class="alert-status ${alert.active === 'TRUE' ? 'active' : 'inactive'}">
-                            ${alert.active === 'TRUE' ? '🟢 Active' : '⚪ Inactive'}
-                        </span>
+        filteredAlerts.forEach(alert => {
+            // Safely handle priority, defaulting to 'Low' if missing or empty.
+            // This prevents rendering errors if an alert has no priority set.
+            const priority = alert.priority || 'Low';
+            const priorityLower = priority.toLowerCase();
+
+            const card = document.createElement('div');
+            card.className = `alert-card priority-${priorityLower}`;
+
+            const priorityIcon = priority === 'High' ? '🔴' : priority === 'Medium' ? '🟡' : '🔵';
+
+            let expiresHTML = '';
+            if (alert.expires) {
+                expiresHTML = `
+                    <div class="alert-expires">
+                        <span class="info-label">Expires:</span>
+                        <span class="info-value">${new Date(alert.expires).toLocaleString()}</span>
                     </div>
+                `;
+            }
+
+            card.innerHTML = `
+                <div class="alert-header">
+                    <div class="alert-title">
+                        <h3></h3>
+                        <div class="alert-priority priority-${priorityLower}">
+                            ${priorityIcon} ${priority}
+                        </div>
+                    </div>
+                    <div class="alert-status ${alert.active ? 'active' : 'inactive'}">${alert.active ? '●' : '○'}</div>
                 </div>
                 
                 <div class="alert-details">
-                    <div class="alert-detail">
-                        <span class="alert-detail-label">Buildings:</span>
-                        <span class="alert-detail-value">${this.formatBuildingNames(alert.buildings)}</span>
+                    <div class="alert-buildings">
+                        <span class="info-label">Buildings:</span>
+                        <span class="buildings-list"></span>
                     </div>
-                    <div class="alert-detail">
-                        <span class="alert-detail-label">Slide ID:</span>
-                        <span class="alert-detail-value">${alert.slideId}</span>
-                    </div>
-                    <div class="alert-detail">
-                        <span class="alert-detail-label">Expires:</span>
-                        <span class="alert-detail-value">${alert.expires ? this.formatDate(alert.expires) : 'Never'}</span>
-                    </div>
+                    ${expiresHTML}
                 </div>
-
+                
                 <div class="alert-actions">
-                    <button class="btn btn-secondary btn-small" onclick="admin.toggleAlert('${alert.alertId}')">
-                        ${alert.active === 'TRUE' ? '⏸️ Deactivate' : '▶️ Activate'}
+                    <button class="edit-btn" data-action="edit" data-id="${alert.alertId}">Edit</button>
+                    <button class="toggle-btn ${alert.active ? 'deactivate' : 'activate'}" data-action="toggle" data-id="${alert.alertId}" data-active="${!alert.active}">
+                        ${alert.active ? 'Deactivate' : 'Activate'}
                     </button>
-                    <button class="btn btn-urgent btn-small" onclick="admin.deployAlertNow('${alert.alertId}')">
-                        ⚡ Deploy Now
-                    </button>
-                    <button class="btn btn-secondary btn-small" onclick="admin.editAlert('${alert.alertId}')">
-                        ✏️ Edit
-                    </button>
-                    <button class="btn btn-danger btn-small" onclick="admin.deleteAlert('${alert.alertId}')">
-                        🗑️ Delete
-                    </button>
+                    <button class="delete-btn" data-action="delete" data-id="${alert.alertId}">Delete</button>
                 </div>
-            </div>
-        `).join('');
+            `;
+
+            card.querySelector('h3').textContent = alert.name || '[No Name]';
+            
+            const buildingsText = Array.isArray(alert.buildings) ? alert.buildings.join(', ') : (alert.buildings || 'None');
+            card.querySelector('.buildings-list').textContent = buildingsText;
+
+            alertsGrid.appendChild(card);
+        });
     }
 
-    // Update device statistics
-    updateStats() {
-        const total = this.devices.length;
-        const online = this.devices.filter(d => d.status === 'online').length;
-
-        document.getElementById('totalDevices').textContent = total;
-        document.getElementById('onlineDevices').textContent = online;
-    }
-
-    // Update alert statistics
-    updateAlertStats() {
-        const total = this.alerts.length;
-        const active = this.alerts.filter(a => a.active === 'TRUE').length;
-        const highPriority = this.alerts.filter(a => a.priority === 'high' && a.active === 'TRUE').length;
-
-        document.getElementById('totalAlerts').textContent = total;
-        document.getElementById('activeAlerts').textContent = active;
-        document.getElementById('highPriorityAlerts').textContent = highPriority;
-    }
-
-    // Setup event listeners
-    setupEventListeners() {
-        // Device modal listeners
-        document.getElementById('addDeviceBtn').addEventListener('click', () => {
-            openAddDeviceModal();
-        });
-
-        document.querySelector('.modal-close').addEventListener('click', () => {
-            this.hideAddDeviceModal();
-        });
-
-        document.getElementById('cancelAdd').addEventListener('click', () => {
-            this.hideAddDeviceModal();
-        });
-
-        document.getElementById('addDeviceModal').addEventListener('click', (e) => {
-            if (e.target === document.getElementById('addDeviceModal')) {
-                this.hideAddDeviceModal();
-            }
-        });
-
-        document.getElementById('addDeviceForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-    
-            const editDeviceId = document.getElementById('editDeviceId').value;
-            if (editDeviceId) {
-                // Edit mode
-                const formData = new FormData(e.target);
-                const deviceData = Object.fromEntries(formData);
-                updateDevice(editDeviceId, deviceData);
-            } else {
-                // Add mode
-                this.handleAddDevice();
-            }
-        });
-
-        // Alert form listener
-        document.getElementById('alertForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.handleAddAlert();
-        });
-
-        // Auto-refresh both devices and alerts every 30 seconds
-        setInterval(() => {
-            this.loadDevices();
-            this.loadAlerts();
-        }, 30000);
-    }
-
-    // === DEVICE MODAL METHODS ===
-
-    showAddDeviceModal() {
-        document.getElementById('addDeviceModal').classList.add('show');
-        document.getElementById('deviceId').focus();
-    }
-
-    hideAddDeviceModal() {
-        document.getElementById('addDeviceModal').classList.remove('show');
-        document.getElementById('addDeviceForm').reset();
-
-        // Reset form for adding (not editing)
-        const modalTitle = document.querySelector('.modal-header h3');
-        const submitBtn = document.querySelector('button[type="submit"]');
-        if (modalTitle) modalTitle.textContent = 'Add New Device';
-        if (submitBtn) submitBtn.textContent = 'Add Device';
-        document.getElementById('deviceId').disabled = false;
-        this.editingDevice = null;
-    }
-
-    async handleAddDevice() {
-        const formData = new FormData(document.getElementById('addDeviceForm'));
-        const deviceData = {
-            deviceId: formData.get('deviceId'),
-            ipAddress: formData.get('ipAddress'),
-            location: formData.get('location'),
-            building: formData.get('building'),
-            template: formData.get('template'),
-            theme: formData.get('theme'),
-            slideId: formData.get('slideId'),
-            refreshInterval: parseInt(formData.get('refreshInterval'))
-        };
-
-        const isEditing = this.editingDevice !== null;
-        const action = isEditing ? 'updated' : 'added';
-        const method = isEditing ? 'PUT' : 'POST';
-        const url = isEditing ? `/api/admin/devices/${this.editingDevice}` : '/api/admin/devices';
-
+    async updateSSEStats() {
         try {
-            const response = await fetch(url, {
-                method: method,
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(deviceData)
-            });
-
+            const response = await fetch('/api/admin/sse/status');
             if (response.ok) {
-                const result = await response.json();
-                this.hideAddDeviceModal();
-
-                if (result.requiresManualUpdate) {
-                    this.showSuccess(`Device "${deviceData.deviceId}" configuration ready!
-
-Please ${isEditing ? 'update' : 'add'} this device in your Google Sheet manually:
-1. Open your Displays sheet
-2. ${isEditing ? 'Update the row for' : 'Add a new row with'} deviceId: ${deviceData.deviceId}
-3. Set building: ${deviceData.building}
-4. Set other values as needed
-
-The device will pick up the new configuration within a few minutes.`);
-                } else {
-                    this.showSuccess(result.message);
+                const status = await response.json();
+                const sseConnectedEl = document.getElementById('sseConnected');
+                if (sseConnectedEl) {
+                    sseConnectedEl.textContent = status.totalConnections;
                 }
-
-                setTimeout(() => {
-                    this.loadDevices();
-                }, 3000);
-            } else {
-                const error = await response.json();
-                throw new Error(error.message || `Failed to ${action.slice(0, -1)} device`);
             }
         } catch (error) {
-            console.error(`Error ${action.slice(0, -1)}ing device:`, error);
-            this.showError(`Failed to ${action.slice(0, -1)} device: ${error.message}`);
+            console.error('Error updating SSE stats:', error);
+            // Don't show user error for SSE stats - just log it
         }
     }
 
-    previewDevice(deviceId) {
-        const url = `/?deviceId=${deviceId}`;
-        window.open(url, '_blank', 'width=1024,height=768');
+    // Stub for a function called in the HTML but not defined
+    async pushRefreshToAll() {
+        try {
+            const response = await fetch('/api/admin/push/refresh-all', { method: 'POST' });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.details || err.error);
+            }
+            const result = await response.json();
+            this.showSuccessMessage(`Refresh signal sent to ${result.devicesNotified} connected devices.`);
+        } catch (error) {
+            console.error('Error pushing refresh to all:', error);
+            this.showError(`Failed to push refresh: ${error.message}`);
+        }
+    }
+    async pushRefreshToDevice(deviceId) {
+        try {
+            const response = await fetch(`/api/admin/push/refresh-one/${deviceId}`, { method: 'POST' });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.message || 'Failed to send refresh signal.');
+            }
+            this.showSuccessMessage(result.message);
+        } catch (error) {
+            console.error(`Error pushing refresh to ${deviceId}:`, error);
+            this.showError(`Could not push refresh: ${error.message}`);
+        }
+    }
+    checkSSEStatus() {
+        console.log("checkSSEStatus called. Implement functionality.");
+        this.updateSSEStats();
+    }
+
+    updateStats() {
+        const filteredDevices = this.getFilteredDevices();
+        const total = filteredDevices.length;
+        const online = filteredDevices.filter(d => d.status === 'online').length;
+
+        // Safely update stats only if elements exist
+        const totalDevicesEl = document.getElementById('totalDevices');
+        if (totalDevicesEl) totalDevicesEl.textContent = total;
+
+        const onlineDevicesEl = document.getElementById('onlineDevices');
+        if (onlineDevicesEl) onlineDevicesEl.textContent = online;
+
+        const totalBuildingsEl = document.getElementById('totalBuildings');
+        if (totalBuildingsEl) totalBuildingsEl.textContent = this.userPermissions.buildings.length;
+
+        // Update SSE connected count
+        this.updateSSEStats();
+
+        // Update Alert Stats
+        const totalAlertsEl = document.getElementById('totalAlerts');
+        if (totalAlertsEl) totalAlertsEl.textContent = this.alerts.length;
+
+        const activeAlerts = this.alerts.filter(a => a.active);
+        const activeAlertsEl = document.getElementById('activeAlerts');
+        if (activeAlertsEl) activeAlertsEl.textContent = activeAlerts.length;
+
+        const highPriorityAlerts = activeAlerts.filter(a => a.priority === 'High').length;
+        const highPriorityAlertsEl = document.getElementById('highPriorityAlerts');
+        if (highPriorityAlertsEl) {
+            highPriorityAlertsEl.textContent = highPriorityAlerts;
+        }
+    }
+
+    // Device Management Methods
+    async showAddDeviceModal() {
+        this.editingDevice = null;
+        document.getElementById('deviceModalTitle').textContent = 'Add New Display';
+        document.getElementById('saveDeviceBtn').textContent = 'Save Display';
+        
+        // Reset form
+        document.getElementById('deviceForm').reset();
+        document.getElementById('active').checked = true;
+        
+        // Pre-fill building if only one option
+        const buildingSelect = document.getElementById('building');
+        if (this.userPermissions.buildings.length === 1) {
+            buildingSelect.value = this.userPermissions.buildings[0];
+            this.updateDeviceIdPrefix(this.userPermissions.buildings[0]);
+        }
+        
+        document.getElementById('deviceModal').classList.add('show');
+    }
+
+    updateDeviceIdPrefix(building) {
+        const deviceIdInput = document.getElementById('deviceId');
+        const currentValue = deviceIdInput.value;
+        
+        // If empty or doesn't have correct prefix, set it
+        if (!currentValue || !currentValue.startsWith(building + '-')) {
+            deviceIdInput.value = building + '-';
+            deviceIdInput.focus();
+            // Move cursor to end
+            deviceIdInput.setSelectionRange(deviceIdInput.value.length, deviceIdInput.value.length);
+        }
+    }
+
+    extractSlideIdFromUrl(url) {
+        if (!url || typeof url !== 'string') return null;
+        
+        const trimmedUrl = url.trim();
+        if (!trimmedUrl) return null;
+        
+        const patterns = [
+            /\/presentation\/d\/([a-zA-Z0-9-_]+)/,
+            /\/presentation\/d\/([a-zA-Z0-9-_]+)\/edit/,
+            /\/presentation\/d\/([a-zA-Z0-9-_]+)\/preview/,
+            /\/presentation\/d\/([a-zA-Z0-9-_]+)\/embed/
+        ];
+        
+        for (const pattern of patterns) {
+            const match = trimmedUrl.match(pattern);
+            if (match && match[1]) {
+                return match[1];
+            }
+        }
+        
+        if (/^[a-zA-Z0-9-_]{40,}$/.test(trimmedUrl)) {
+            return trimmedUrl;
+        }
+        
+        return null;
+    }
+
+    updateSlideIdFromUrl() {
+        const urlInput = document.getElementById('presentationLink');
+        const slideIdInput = document.getElementById('slideId');
+        const validation = document.getElementById('urlValidation');
+        const url = urlInput.value.trim();
+        
+        if (!url) {
+            validation.style.display = 'none';
+            return;
+        }
+
+        const extractedId = this.extractSlideIdFromUrl(url);
+        
+        if (extractedId) {
+            slideIdInput.value = extractedId;
+            validation.innerHTML = `<div class="validation-success">✅ ID extracted successfully.</div>`;
+        } else {
+            validation.innerHTML = `<div class="validation-error">❌ Could not extract a valid ID from the URL.</div>`;
+        }
+        validation.style.display = 'block';
+    }
+
+    async saveDevice(formData) {
+        try {
+            const url = this.editingDevice 
+                ? `/api/admin/devices/${this.editingDevice.deviceId}`
+                : '/api/admin/devices';
+            
+            const method = this.editingDevice ? 'PUT' : 'POST';
+            
+            const response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(formData)
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.details ? error.details.join(', ') : error.error);
+            }
+
+            await this.loadDevices();
+            this.updateStats();
+            this.closeDeviceModal();
+            
+            this.showSuccessMessage(this.editingDevice ? 'Display updated successfully' : 'Display created successfully');
+            
+        } catch (error) {
+            console.error('Error saving device:', error);
+            this.showError(`Failed to save display: ${error.message}`);
+        }
     }
 
     editDevice(deviceId) {
         const device = this.devices.find(d => d.deviceId === deviceId);
-        if (device) {
-            document.getElementById('deviceId').value = device.deviceId;
-            document.getElementById('ipAddress').value = device.ipAddress || '';
-            document.getElementById('location').value = device.location || '';
-            document.getElementById('building').value = device.building || '';
-            document.getElementById('template').value = device.template || 'standard';
-            document.getElementById('theme').value = device.theme || 'default';
-            document.getElementById('slideId').value = device.slideId || '';
-            document.getElementById('refreshInterval').value = device.refreshInterval || 15;
-
-            const modalTitle = document.querySelector('.modal-header h3');
-            const submitBtn = document.querySelector('button[type="submit"]');
-            if (modalTitle) modalTitle.textContent = `Edit Device: ${deviceId}`;
-            if (submitBtn) submitBtn.textContent = 'Update Device';
-            document.getElementById('deviceId').disabled = true;
-
-            this.editingDevice = deviceId;
-            this.showAddDeviceModal();
-        }
+        if (!device) return;
+        
+        this.editingDevice = device;
+        document.getElementById('deviceModalTitle').textContent = 'Edit Display';
+        document.getElementById('saveDeviceBtn').textContent = 'Update Display';
+        
+        // Populate form
+        document.getElementById('deviceId').value = device.deviceId;
+        document.getElementById('name').value = device.name;
+        document.getElementById('location').value = device.location || '';
+        document.getElementById('ipAddress').value = device.ipAddress || '';
+        document.getElementById('coordinates').value = device.coordinates || '';
+        document.getElementById('notes').value = device.notes || '';
+        document.getElementById('building').value = device.building;
+        document.getElementById('template').value = device.template;
+        document.getElementById('presentationLink').value = device.presentationLink || '';
+        document.getElementById('slideId').value = device.slideId || '';
+        document.getElementById('active').checked = device.active;
+        
+        document.getElementById('deviceModal').classList.add('show');
     }
 
     async deleteDevice(deviceId) {
-        if (!confirm(`Are you sure you want to delete device "${deviceId}"?`)) {
-            return;
-        }
+        if (!confirm(`Are you sure you want to delete display "${deviceId}"?`)) return;
 
         try {
             const response = await fetch(`/api/admin/devices/${deviceId}`, {
                 method: 'DELETE'
             });
 
-            if (response.ok) {
-                const result = await response.json();
-                this.showSuccess(result.message);
-                setTimeout(() => this.loadDevices(), 2000);
-            } else {
+            if (!response.ok) {
                 const error = await response.json();
-                throw new Error(error.message || 'Failed to delete device');
+                throw new Error(error.error);
             }
+
+            await this.loadDevices();
+            this.updateStats();
+            
+            this.showSuccessMessage('Display deleted successfully');
+            
         } catch (error) {
             console.error('Error deleting device:', error);
-            this.showError(`Failed to delete device: ${error.message}`);
+            this.showError(`Failed to delete display: ${error.message}`);
         }
     }
 
-    // === ALERT METHODS ===
+    viewDevice(deviceId) {
+        // Open device view in new tab
+        window.open(`/?deviceId=${deviceId}`, '_blank');
+    }
 
-    async handleAddAlert() {
-        const selectedBuildings = this.getSelectedBuildings();
-
-        if (selectedBuildings.length === 0) {
-            this.showError('Please select at least one building for this alert.');
+    // Alert Management Methods
+    async showAddAlertModal() {
+        this.editingAlert = null;
+        document.getElementById('alertModalTitle').textContent = 'Create New Alert';
+        document.getElementById('saveAlertBtn').textContent = 'Create Alert';
+        
+        // Reset form
+        document.getElementById('alertForm').reset();
+        document.getElementById('alertActive').checked = true;
+        
+        // Uncheck all building checkboxes
+        const checkboxes = document.querySelectorAll('input[name="buildings"]');
+        checkboxes.forEach(cb => cb.checked = false);
+        
+        document.getElementById('alertModal').classList.add('show');
+    }
+    
+    editAlert(alertId) {
+        const alert = this.alerts.find(a => a.alertId === alertId);
+        if (!alert) {
+            console.error(`Alert with ID ${alertId} not found.`);
+            this.showError(`Could not find alert ${alertId} to edit.`);
             return;
         }
+        
+        this.editingAlert = alert;
+        document.getElementById('alertModalTitle').textContent = 'Edit Alert';
+        document.getElementById('saveAlertBtn').textContent = 'Update Alert';
+        
+        // Populate form
+        // Note: alert.active is now a boolean from the server
+        document.getElementById('alertName').value = alert.name;
+        document.getElementById('alertSlideId').value = alert.slideId;
+        document.getElementById('priority').value = alert.priority;
+        document.getElementById('expires').value = alert.expires || '';
+        document.getElementById('alertActive').checked = alert.active;
+        
+        // Set building checkboxes
+        // The 'buildings' property should already be an array from the server
+        const alertBuildings = Array.isArray(alert.buildings) ? alert.buildings : [];
+        document.querySelectorAll('input[name="buildings"]').forEach(cb => {
+            cb.checked = alertBuildings.includes(cb.value);
+        });
+        
+        document.getElementById('alertModal').classList.add('show');
+    }
 
-        const formData = new FormData(document.getElementById('alertForm'));
-        const alertData = {
-            name: formData.get('alertName'),
-            slideId: formData.get('alertSlideId'),
-            buildings: selectedBuildings,
-            priority: formData.get('alertPriority'),
-            expires: formData.get('alertExpires') || null
-        };
+    selectAllBuildings() {
+        const checkboxes = document.querySelectorAll('input[name="buildings"]');
+        checkboxes.forEach(cb => cb.checked = true);
+    }
 
+    selectElementaryBuildings() {
+        const elementaryBuildings = ['SE', 'IS'];
+        const checkboxes = document.querySelectorAll('input[name="buildings"]');
+        checkboxes.forEach(cb => {
+            cb.checked = elementaryBuildings.includes(cb.value);
+        });
+    }
+
+    selectSecondaryBuildings() {
+        const secondaryBuildings = ['MS', 'HS'];
+        const checkboxes = document.querySelectorAll('input[name="buildings"]');
+        checkboxes.forEach(cb => {
+            cb.checked = secondaryBuildings.includes(cb.value);
+        });
+    }
+
+    async saveAlert(alertData) {
         try {
-            const response = await fetch('/api/admin/alerts', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+            const url = this.editingAlert 
+                ? `/api/admin/alerts/${this.editingAlert.alertId}`
+                : '/api/admin/alerts';
+            
+            const method = this.editingAlert ? 'PUT' : 'POST';
+
+            // Client-side validation for buildings
+            if (!alertData.buildings || alertData.buildings.length === 0) {
+                throw new Error('Please select at least one building');
+            }
+
+            const response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(alertData)
             });
 
-            if (response.ok) {
-                const result = await response.json();
-
-                if (result.requiresManualUpdate) {
-                    this.showSuccess(`Alert "${alertData.name}" configuration ready!
-
-Please add this alert to your Alerts sheet manually:
-1. Open your Google Sheets and go to the Alerts sheet
-2. Add a new row with these values:
-   • Name: ${alertData.name}
-   • Slide ID: ${alertData.slideId}
-   • Buildings: ${alertData.buildings.join(',')}
-   • Priority: ${alertData.priority}
-   • Active: TRUE
-   • Expires: ${alertData.expires || '(leave empty)'}
-
-The alert will be active once added to the sheet.`);
-                } else {
-                    this.showSuccess(result.message);
-                }
-
-                // Reset form and refresh
-                document.getElementById('alertForm').reset();
-                clearAllBuildings();
-                setTimeout(() => {
-                    this.loadAlerts();
-                }, 3000);
-            } else {
+            if (!response.ok) {
                 const error = await response.json();
-                throw new Error(error.message || 'Failed to add alert');
+                throw new Error(error.details || error.error || 'An unknown server error occurred.');
             }
+
+            await this.loadAlerts();
+            this.updateStats();
+            this.closeAlertModal();
+
+            this.showSuccessMessage(this.editingAlert ? 'Alert updated successfully' : 'Alert created successfully');
+
         } catch (error) {
-            console.error('Error adding alert:', error);
-            this.showError(`Failed to add alert: ${error.message}`);
+            console.error('Error saving alert:', error);
+            this.showError(`Failed to save alert: ${error.message}`);
         }
     }
 
-    async toggleAlert(alertId) {
+    async toggleAlert(alertId, active) {
         try {
             const response = await fetch(`/api/admin/alerts/${alertId}/toggle`, {
-                method: 'PATCH'
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ active: active })
             });
 
-            if (response.ok) {
-                const result = await response.json();
-                this.showSuccess(result.message);
-                setTimeout(() => this.loadAlerts(), 1000);
-            } else {
+            if (!response.ok) {
                 const error = await response.json();
-                throw new Error(error.message || 'Failed to toggle alert');
+                throw new Error(error.error);
             }
+
+            await this.loadAlerts();
+            this.updateStats();
+            
+            this.showSuccessMessage(`Alert ${active ? 'activated' : 'deactivated'} successfully`);
+            
         } catch (error) {
             console.error('Error toggling alert:', error);
-            this.showError(`Failed to toggle alert: ${error.message}`);
-        }
-    }
-
-    editAlert(alertId) {
-        const alert = this.alerts.find(a => a.alertId === alertId);
-        if (alert) {
-            // Populate edit form
-            document.getElementById('editAlertId').value = alert.alertId;
-            document.getElementById('editAlertName').value = alert.name;
-            document.getElementById('editAlertSlideId').value = alert.slideId;
-            document.getElementById('editAlertPriority').value = alert.priority;
-            document.getElementById('editAlertExpires').value = alert.expires || '';
-
-            // Set building checkboxes
-            const checkboxes = document.querySelectorAll('#editBuildingCheckboxes input[type="checkbox"]');
-            checkboxes.forEach(cb => {
-                cb.checked = alert.buildings.includes(cb.value);
-            });
-
-            this.showAlertEditModal();
+            this.showError(`Failed to ${active ? 'activate' : 'deactivate'} alert: ${error.message}`);
         }
     }
 
     async deleteAlert(alertId) {
-        const alert = this.alerts.find(a => a.alertId === alertId);
-        if (!confirm(`Are you sure you want to delete alert "${alert?.name}"?`)) {
-            return;
-        }
+        if (!confirm('Are you sure you want to delete this alert?')) return;
 
         try {
             const response = await fetch(`/api/admin/alerts/${alertId}`, {
                 method: 'DELETE'
             });
 
-            if (response.ok) {
-                const result = await response.json();
-                this.showSuccess(result.message);
-                setTimeout(() => this.loadAlerts(), 2000);
-            } else {
+            if (!response.ok) {
                 const error = await response.json();
-                throw new Error(error.message || 'Failed to delete alert');
+                throw new Error(error.error);
             }
+
+            await this.loadAlerts();
+            this.updateStats();
+            this.showSuccessMessage('Alert deleted successfully');
         } catch (error) {
             console.error('Error deleting alert:', error);
             this.showError(`Failed to delete alert: ${error.message}`);
         }
     }
 
-    showAlertEditModal() {
-        document.getElementById('alertEditModal').classList.add('show');
+    // Utility Methods
+    closeDeviceModal() {
+        document.getElementById('deviceModal').classList.remove('show');
     }
 
-    closeAlertEditModal() {
-        document.getElementById('alertEditModal').classList.remove('show');
+    closeAlertModal() {
+        document.getElementById('alertModal').classList.remove('show');
     }
 
-    async saveAlertEdit() {
-        const alertId = document.getElementById('editAlertId').value;
-        const selectedBuildings = this.getEditSelectedBuildings();
-        
-        if (selectedBuildings.length === 0) {
-            this.showError('Please select at least one building for this alert.');
-            return;
+    hideLoading() {
+        const loading = document.getElementById('loading');
+        if (loading) {
+            loading.style.display = 'none';
         }
-
-        const alertData = {
-            name: document.getElementById('editAlertName').value,
-            slideId: document.getElementById('editAlertSlideId').value,
-            buildings: selectedBuildings,
-            priority: document.getElementById('editAlertPriority').value,
-            expires: document.getElementById('editAlertExpires').value || null
-        };
-
-        try {
-            const response = await fetch(`/api/admin/alerts/${alertId}`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(alertData)
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                this.showSuccess(result.message);
-                this.closeAlertEditModal();
-                setTimeout(() => this.loadAlerts(), 2000);
-            } else {
-                const error = await response.json();
-                throw new Error(error.message || 'Failed to update alert');
-            }
-        } catch (error) {
-            console.error('Error updating alert:', error);
-            this.showError(`Failed to update alert: ${error.message}`);
-        }
-    }
-
-    // === SSE PUSH METHODS ===
-
-    async pushRefreshToDevice(deviceId) {
-        try {
-            const response = await fetch(`/api/admin/push/refresh`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deviceIds: [deviceId] })
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                this.showSuccess(`Refresh pushed to device ${deviceId} (${result.pushed}/${result.results.length} successful)`);
-            } else {
-                throw new Error('Failed to push refresh');
-            }
-        } catch (error) {
-            console.error('Error pushing refresh:', error);
-            this.showError('Failed to push refresh to device');
-        }
-    }
-
-    async pushRefreshToAll() {
-        try {
-            const response = await fetch(`/api/admin/push/refresh-all`, {
-                method: 'POST'
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                this.showSuccess(`Refresh pushed to all devices (${result.devicesNotified}/${result.totalDevices} connected)`);
-            } else {
-                throw new Error('Failed to push refresh to all');
-            }
-        } catch (error) {
-            console.error('Error pushing refresh to all:', error);
-            this.showError('Failed to push refresh to all devices');
-        }
-    }
-
-    async deployAlertNow(alertId) {
-        try {
-            const response = await fetch(`/api/admin/alerts/${alertId}/deploy`, {
-                method: 'POST'
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                this.showSuccess(`Alert deployed immediately to ${result.devicesNotified} devices in buildings: ${result.buildings.join(', ')}`);
-            } else {
-                throw new Error('Failed to deploy alert');
-            }
-        } catch (error) {
-            console.error('Error deploying alert:', error);
-            this.showError('Failed to deploy alert immediately');
-        }
-    }
-
-    async checkSSEStatus() {
-        try {
-            const response = await fetch('/api/admin/sse/status');
-            if (response.ok) {
-                const status = await response.json();
-                this.showSuccess(`SSE Status: ${status.totalConnections} devices connected\nConnected devices: ${status.connectedDevices.join(', ') || 'None'}`);
-            } else {
-                throw new Error('Failed to get SSE status');
-            }
-        } catch (error) {
-            console.error('Error checking SSE status:', error);
-            this.showError('Failed to check SSE status');
-        }
-    }
-
-    // === BUILDING SELECTION HELPERS ===
-
-    getSelectedBuildings() {
-        const checkboxes = document.querySelectorAll('input[name="buildings"]:checked');
-        return Array.from(checkboxes).map(cb => cb.value);
-    }
-
-    getEditSelectedBuildings() {
-        const checkboxes = document.querySelectorAll('input[name="editBuildings"]:checked');
-        return Array.from(checkboxes).map(cb => cb.value);
-    }
-
-    selectBuildings(codes) {
-        // Clear all checkboxes first
-        document.querySelectorAll('input[name="buildings"]').forEach(cb => {
-            cb.checked = false;
-        });
-        
-        // Check the specified building codes
-        codes.forEach(code => {
-            const checkbox = document.querySelector(`input[name="buildings"][value="${code}"]`);
-            if (checkbox) {
-                checkbox.checked = true;
-            }
-        });
-    }
-
-    // === HELPER FUNCTIONS ===
-
-    formatBuildingNames(buildingCodes) {
-        const buildingNames = {
-            'SE': 'Schumann Elementary',
-            'IS': 'Intermediate School', 
-            'MS': 'Middle School',
-            'HS': 'High School',
-            'DC': 'Discovery Center',
-            'DO': 'District Office'
-        };
-
-        if (!buildingCodes || buildingCodes.length === 0) return 'None';
-        
-        return buildingCodes.map(code => {
-            const name = buildingNames[code];
-            return name ? `${code}` : code;
-        }).join(', ');
-    }
-
-    formatDate(dateString) {
-        if (!dateString || dateString === 'Never') return 'Never';
-
-        const date = new Date(dateString);
-        const now = new Date();
-        const diffMs = now - date;
-        const diffMins = Math.floor(diffMs / 60000);
-
-        if (diffMins < 1) return 'Just now';
-        if (diffMins < 60) return `${diffMins}m ago`;
-
-        const diffHours = Math.floor(diffMins / 60);
-        if (diffHours < 24) return `${diffHours}h ago`;
-
-        const diffDays = Math.floor(diffHours / 24);
-        if (diffDays < 7) return `${diffDays}d ago`;
-
-        return date.toLocaleDateString();
-    }
-
-    showSuccess(message) {
-        this.showNotification(message, 'success');
     }
 
     showError(message) {
-        this.showNotification(message, 'error');
-    }
-
-    showNotification(message, type = 'info') {
-        const notification = document.createElement('div');
-        notification.className = `notification notification-${type}`;
-
-        if (message.includes('\n')) {
-            const lines = message.split('\n');
-            const title = lines[0];
-            const body = lines.slice(1).join('\n');
-
-            notification.innerHTML = `
-                <div style="font-weight: bold; margin-bottom: 0.5rem;">${title}</div>
-                <div style="white-space: pre-line; font-size: 0.9rem; line-height: 1.4;">${body}</div>
-            `;
-        } else {
-            notification.textContent = message;
-        }
-
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 1.5rem;
-            border-radius: 6px;
-            color: white;
-            font-weight: 500;
-            z-index: 1001;
-            max-width: 500px;
-            opacity: 0;
-            transform: translateX(100%);
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        `;
-
-        switch (type) {
-            case 'success':
-                notification.style.backgroundColor = '#38a169';
-                break;
-            case 'error':
-                notification.style.backgroundColor = '#e53e3e';
-                break;
-            default:
-                notification.style.backgroundColor = '#667eea';
-        }
-
-        document.body.appendChild(notification);
-
-        requestAnimationFrame(() => {
-            notification.style.opacity = '1';
-            notification.style.transform = 'translateX(0)';
-        });
-
-        setTimeout(() => {
-            notification.style.opacity = '0';
-            notification.style.transform = 'translateX(100%)';
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.parentNode.removeChild(notification);
-                }
-            }, 300);
-        }, 8000);
-    }
-}
-
-// === GLOBAL BUILDING SELECTION FUNCTIONS ===
-
-function selectAllSchools() {
-    admin.selectBuildings(['SE', 'IS', 'MS', 'HS']);
-}
-
-function selectElementaryLevel() {
-    admin.selectBuildings(['SE', 'IS']);
-}
-
-function selectSecondaryLevel() {
-    admin.selectBuildings(['MS', 'HS']);
-}
-
-function selectAllBuildings() {
-    admin.selectBuildings(['SE', 'IS', 'MS', 'HS', 'DC', 'DO']);
-}
-
-function clearAllBuildings() {
-    admin.selectBuildings([]);
-}
-
-function refreshAlerts() {
-    const refreshText = document.getElementById('refreshAlertsText');
-    refreshText.textContent = 'Refreshing...';
-    
-    admin.loadAlerts().then(() => {
-        refreshText.textContent = 'Refresh';
-    });
-}
-
-function filterAlerts() {
-    const filter = document.getElementById('alertFilter').value;
-    console.log('Filter alerts by:', filter);
-}
-
-function closeAlertEditModal() {
-    admin.closeAlertEditModal();
-}
-
-function saveAlertEdit() {
-    admin.saveAlertEdit();
-}
-
-// === GLOBAL MODAL FUNCTIONS ===
-
-// Function to open modal in "Add" mode
-function openAddDeviceModal() {
-    const form = document.getElementById('addDeviceForm');
-    const editDeviceId = document.getElementById('editDeviceId');
-    const modalTitle = document.getElementById('modalTitle');
-    const submitBtn = document.getElementById('submitDeviceBtn');
-    const modal = document.getElementById('addDeviceModal');
-    
-    if (!form || !modalTitle || !submitBtn || !modal) {
-        console.error('Missing modal elements');
-        return;
-    }
-    
-    form.reset();
-    if (editDeviceId) editDeviceId.value = '';
-    
-    // Set modal to "Add" mode
-    modalTitle.textContent = 'Add New Device';
-    submitBtn.textContent = 'Add Device';
-    
-    // Show modal
-    modal.classList.add('show');
-}
-
-// Store device data globally for edit mode
-let currentEditDevice = null;
-
-// Function to open modal in "Edit" mode
-function openEditDeviceModal(deviceData) {
-    // Store device data
-    currentEditDevice = deviceData;
-    
-    // Get all elements first
-    const elements = {
-        editDeviceId: document.getElementById('editDeviceId'),
-        deviceId: document.getElementById('deviceId'),
-        ipAddress: document.getElementById('ipAddress'),
-        location: document.getElementById('location'),
-        building: document.getElementById('building'),
-        template: document.getElementById('template'),
-        theme: document.getElementById('theme'),
-        slideId: document.getElementById('slideId'),
-        refreshInterval: document.getElementById('refreshInterval'),
-        modalTitle: document.getElementById('modalTitle'),
-        submitBtn: document.getElementById('submitDeviceBtn'),
-        modal: document.getElementById('addDeviceModal')
-    };
-    
-    // Check if all required elements exist
-    const missingElements = Object.entries(elements).filter(([key, el]) => !el).map(([key]) => key);
-    if (missingElements.length > 0) {
-        console.error('Missing elements:', missingElements);
-        return;
-    }
-    
-    // Populate form with device data
-    elements.editDeviceId.value = deviceData.deviceId;
-    elements.deviceId.value = deviceData.deviceId;
-    elements.ipAddress.value = deviceData.ipAddress || '';
-    elements.location.value = deviceData.location || '';
-    elements.building.value = deviceData.building || '';
-    elements.template.value = deviceData.template || 'standard';
-    elements.theme.value = deviceData.theme || 'default';
-    elements.slideId.value = deviceData.slideId || '';
-    elements.refreshInterval.value = deviceData.refreshInterval || 15;
-    
-    // Set modal to "Edit" mode
-    elements.modalTitle.textContent = 'Edit Device: ' + deviceData.deviceId;
-    elements.submitBtn.textContent = 'Save Changes';
-    
-    // Show modal
-    elements.modal.classList.add('show');
-}
-
-// Helper function to handle edit clicks
-function editDeviceClick(deviceId) {
-    // Find the device data from the admin's device list
-    if (!admin || !admin.devices) {
-        console.error('Admin or devices list not available');
-        return;
-    }
-    
-    const device = admin.devices.find(d => d.deviceId === deviceId);
-    if (device) {
-        openEditDeviceModal(device);
-    } else {
-        console.error('Device not found:', deviceId);
-        console.log('Available devices:', admin.devices.map(d => d.deviceId));
-    }
-}
-
-// Update device function
-async function updateDevice(deviceId, deviceData) {
-    try {
-        const response = await fetch(`/api/admin/devices/${deviceId}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(deviceData)
-        });
+        console.error('Error:', message);
         
-        if (response.ok) {
-            // Close modal
-            const modal = document.getElementById('addDeviceModal');
-            if (modal) modal.classList.remove('show');
-            currentEditDevice = null;
-            
-            // Refresh the device list
-            admin.loadDevices();
-            
-            alert('Device updated successfully!');
-        } else {
-            const errorText = await response.text();
-            throw new Error(`Failed to update device: ${errorText}`);
+        // Try to hide loading if it exists
+        const loading = document.getElementById('loading');
+        if (loading) {
+            loading.style.display = 'none';
         }
-    } catch (error) {
-        console.error('Error updating device:', error);
-        alert('Error updating device: ' + error.message);
+        
+        // Try to show error message if elements exist
+        const errorText = document.getElementById('errorText');
+        const errorMessage = document.getElementById('errorMessage');
+        
+        if (errorText && errorMessage) {
+            errorText.textContent = message;
+            errorMessage.style.display = 'block';
+        } else {
+            // Fallback to alert if error elements don't exist
+            alert('Error: ' + message);
+        }
+    }
+
+    showSuccessMessage(message) {
+        // You can implement a toast notification here
+        console.log('Success:', message);
+        // For now, just log to console, but you could show a toast/snackbar
     }
 }
 
-// Initialize admin interface when page loads
-let admin;
-document.addEventListener('DOMContentLoaded', () => {
-    admin = new AdminInterface();
+// Form handling
+document.addEventListener('DOMContentLoaded', function() {
+    const adminInterface = new AdminInterface();
+    // Initialize the interface
+    adminInterface.init();
+    
+    // Device form submission
+    document.getElementById('deviceForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(e.target);
+        const data = {
+            deviceId: formData.get('deviceId'),
+            name: formData.get('name'),
+            location: formData.get('location'),
+            ipAddress: formData.get('ipAddress'),
+            coordinates: formData.get('coordinates'),
+            notes: formData.get('notes'),
+            building: formData.get('building'),
+            template: formData.get('template'),
+            presentationLink: formData.get('presentationLink'),
+            slideId: formData.get('slideId'),
+            active: formData.has('active')
+        };
+        
+        adminInterface.saveDevice(data);
+    });
+    
+    // Alert form submission
+    document.getElementById('alertForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(e.target);
+        const data = {
+            name: formData.get('name'),
+            slideId: formData.get('slideId'),
+            priority: formData.get('priority'),
+            expires: formData.get('expires'),
+            active: formData.has('active'),
+            // Get selected buildings and add them to the data object as an array
+            buildings: Array.from(document.querySelectorAll('input[name="buildings"]:checked')).map(cb => cb.value)
+        };
+        
+        adminInterface.saveAlert(data);
+    });
+    
+    // Building change handler for device ID prefix
+    const buildingSelect = document.getElementById('building');
+    if (buildingSelect) {
+        buildingSelect.addEventListener('change', function(e) {
+            if (e.target.value) {
+                adminInterface.updateDeviceIdPrefix(e.target.value);
+            }
+        });
+    }
+    
+    // Presentation link validation
+    let validationTimeout;
+    const presentationLinkInput = document.getElementById('presentationLink');
+    if (presentationLinkInput) {
+        presentationLinkInput.addEventListener('input', function() {
+            clearTimeout(validationTimeout);
+            validationTimeout = setTimeout(() => {
+                adminInterface.updateSlideIdFromUrl();
+            }, 500); // Validate after 500ms of no typing
+        });
+    }
+
+    // --- Event Listeners for Buttons ---
+    document.getElementById('addDeviceBtn').addEventListener('click', () => adminInterface.showAddDeviceModal());
+    document.getElementById('addAlertBtn').addEventListener('click', () => adminInterface.showAddAlertModal());
+
+    document.getElementById('closeDeviceModalBtn').addEventListener('click', () => adminInterface.closeDeviceModal());
+    document.getElementById('cancelDeviceBtn').addEventListener('click', () => adminInterface.closeDeviceModal());
+    document.getElementById('closeAlertModalBtn').addEventListener('click', () => adminInterface.closeAlertModal());
+    document.getElementById('cancelAlertBtn').addEventListener('click', () => adminInterface.closeAlertModal());
+
+    document.getElementById('selectAllBtn').addEventListener('click', () => adminInterface.selectAllBuildings());
+    document.getElementById('selectElementaryBtn').addEventListener('click', () => adminInterface.selectElementaryBuildings());
+    document.getElementById('selectSecondaryBtn').addEventListener('click', () => adminInterface.selectSecondaryBuildings());
+
+    document.getElementById('pushRefreshBtn').addEventListener('click', () => adminInterface.pushRefreshToAll());
+    document.getElementById('checkSseBtn').addEventListener('click', () => adminInterface.checkSSEStatus());
+
+    // Listen for clicks on the empty state buttons
+    document.getElementById('devicesGrid').addEventListener('click', (e) => {
+        if (e.target.id === 'addEmptyDeviceBtn') {
+            adminInterface.showAddDeviceModal();
+        }
+    });
+    document.getElementById('alertsGrid').addEventListener('click', (e) => {
+        if (e.target.id === 'addEmptyAlertBtn') {
+            adminInterface.showAddAlertModal();
+        }
+    });
+
+    // Event Delegation for Device Actions
+    document.getElementById('devicesGrid').addEventListener('click', (e) => {
+        const button = e.target.closest('button[data-action]');
+        if (!button) return;
+
+        const { action, id } = button.dataset;
+
+        if (action === 'edit') {
+            adminInterface.editDevice(id);
+        } else if (action === 'delete') {
+            adminInterface.deleteDevice(id);
+        } else if (action === 'push-refresh') {
+            adminInterface.pushRefreshToDevice(id);
+        } else if (action === 'view') {
+            adminInterface.viewDevice(id);
+        }
+    });
+
+    // Event Delegation for Alert Actions
+    document.getElementById('alertsGrid').addEventListener('click', (e) => {
+        const button = e.target.closest('button[data-action]');
+        if (!button) return;
+
+        const { action, id } = button.dataset;
+
+        if (action === 'edit') {
+            adminInterface.editAlert(id);
+        } else if (action === 'delete') {
+            adminInterface.deleteAlert(id);
+        } else if (action === 'toggle') {
+            const active = button.dataset.active === 'true';
+            adminInterface.toggleAlert(id, active);
+        }
+    });
 });
