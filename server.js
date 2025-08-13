@@ -2215,12 +2215,21 @@ async function fetchAndFormatNutrisliceMenu(schoolSlug, mealType, dateInfo) {
 
 // --- New: Building-aware menu API endpoint ---
 app.get('/api/menu', async (req, res) => {
-const { building } = req.query;
+  const { building } = req.query;
 
-if (!building) return res.status(400).send('Building parameter is required.');
+  if (!building) return res.status(400).send('Building parameter is required.');
 
-const schoolSlug = SCHOOL_SLUG_MAP[building];
-if (!schoolSlug) return res.status(404).send(`No menu configuration found for building: ${building}`);
+  // Handle the special case where the District Office (DO) uses the
+  // Intermediate School (IS) menu, as it has no kitchen of its own.
+  let effectiveBuilding = building;
+  if (building === 'DO') {
+    console.log(`Menu request for District Office (DO), redirecting to Intermediate School (IS) menu.`);
+    effectiveBuilding = 'IS';
+  }
+
+  const schoolSlug = SCHOOL_SLUG_MAP[effectiveBuilding];
+  // The error message should refer to the *original* building code for clarity.
+  if (!schoolSlug) return res.status(404).send(`No menu configuration found for building: ${building}`);
 
 try {
   const today = new Date();

@@ -153,7 +153,9 @@ html, body {
 [data-module="calendar"] {
     flex-grow: 1; /* Fill remaining vertical space */
     padding: 0;
-    min-height: 0; /* Fixes flexbox overflow issue in some browsers */    
+    min-height: 0; /* Fixes flexbox overflow issue in some browsers */
+    /* This is the key to clipping the iframe's footer on browsers that ignore URL params */
+    overflow: hidden;    
 }
 
 [data-module="calendar"] iframe {
@@ -189,7 +191,7 @@ html, body {
 }
 
 #info-date {
-    font-size: 2rem;
+    font-size: 3rem;
     text-align: left;
 }
 
@@ -206,12 +208,12 @@ html, body {
 }
 
 .weather-temp {
-    font-size: 2rem;
+    font-size: 3rem;
     font-weight: 600;
 }
 
 #info-time {
-    font-size: 2rem;
+    font-size: 3rem;
     font-weight: 600;
     text-align: right;
 }
