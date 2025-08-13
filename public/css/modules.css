@@ -22,18 +22,34 @@ html, body {
 
 /* --- Slideshow Container Fix --- */
 /* Ensures the slideshow iframe fills its designated area in any layout */
+/*
+  The modern `aspect-ratio` property is used here to solve two problems at once:
+  1. It forces the container into a 16:9 shape, which prevents Google Slides
+     from adding black "letterbox" bars.
+  2. By setting a max-width and max-height of less than 100% (e.g., 98%),
+     we can scale the slideshow down slightly to create a visually appealing
+     margin on all sides, without needing the old `transform: scale()` hack.
+*/
 #slideContainer {
-    width: 100%;
-    height: 100%;
+    aspect-ratio: 16 / 9; /* Force 1080p aspect ratio */
+    max-width: 98%;       /* This value controls the overall size/margin of the slideshow. */
+    max-height: 98%;      /* Keep this value the same as max-width. */
+    margin: 0px auto 0;        /* This is key to centering it within its parent container */
+    overflow: hidden;     /* Crucial for clipping the scaled iframe below */
+    border-radius: 8px;   /* Adds a nice rounded corner to match other modules */
 }
 
 #slideContainer iframe {
     width: 100%;
     height: 100%;
     border: none;
-    /* Zoom in slightly to crop out Google Slides' black letterbox bars */
-    transform: scale(1.05);
-    transform-origin: center;    
+    /*
+      A slight zoom is still needed to crop the black bars/rounded corners
+      that are part of the Google Slides player itself. As you decrease the
+      max-width/max-height of the container above, this scale value needs to
+      increase slightly to compensate. (e.g., 98% -> 1.04, 94% -> 1.08)
+    */
+    transform: scale(1.04); 
 }
 
 /* --- General Module Container Styling --- */
