@@ -4,35 +4,40 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OPSsign2 - Digital Signage System</title>
+    <link rel="stylesheet" href="/shared-styles.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            /* Homepage-specific background */
+            background: linear-gradient(135deg, var(--orono-primary-blue) 0%, var(--orono-deep-navy) 100%);
             min-height: 100vh;
-            color: #333;
         }
         .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
         .header {
             display: flex;
             align-items: center;
-            color: white;
+            color: var(--text-light);
             margin-bottom: 3rem;
             padding: 2rem 0;
         }
         .header-logo {
             height: 100px;
             margin-right: 1.5rem;
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+            padding: 5px;
         }
         .header-text h1 {
             font-size: 3rem;
             margin: 0;
             line-height: 1.1;
+            color: var(--text-light); /* Override shared style for header */
         }
         .header-text p {
             font-size: 1.2rem;
             opacity: 0.9;
             margin: 0;
+            color: var(--text-light);
         }
         .cards {
             display: grid;
@@ -40,59 +45,28 @@
             gap: 2rem;
             margin-bottom: 3rem;
         }
-        .card {
-            background: white;
-            padding: 2rem;
-            border-radius: 12px;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
-            transition: transform 0.2s;
-        }
-        .card:hover { transform: translateY(-5px); }
-        .card h3 { color: #667eea; margin-bottom: 1rem; font-size: 1.5rem; }
-        .card p { margin-bottom: 1.5rem; color: #666; line-height: 1.6; }
-        .btn {
-            display: inline-block;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 0.75rem 1.5rem;
-            text-decoration: none;
-            border-radius: 6px;
-            font-weight: 500;
-            transition: transform 0.2s;
-            margin-right: 1rem;
-            margin-bottom: 0.5rem;
-        }
-        .btn:hover { transform: translateY(-1px); }
-        .btn-secondary {
-            background: #e2e8f0;
-            color: #4a5568;
-        }
-        .btn-success {
-            background: #38a169;
-            color: white;
-        }
         .devices-list {
             background: white;
             padding: 2rem;
             border-radius: 12px;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            box-shadow: 0 8px 25px var(--shadow-color);
             margin-bottom: 2rem;
         }
-        .devices-list h3 { color: #667eea; margin-bottom: 1rem; }
+        .devices-list h3 { color: var(--orono-primary-blue); margin-bottom: 1rem; }
         .device-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
             padding: 1rem;
-            border-bottom: 1px solid #e2e8f0;
+            border-bottom: 1px solid var(--border-color);
         }
         .device-item:last-child { border-bottom: none; }
-        .device-info h4 { margin: 0; color: #2d3748; }
-        .device-info p { margin: 0; color: #718096; font-size: 0.9rem; }
+        .device-info h4 { margin: 0; color: var(--text-dark); }
+        .device-info p { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
         .device-actions a { margin-left: 0.5rem; }
         .setup-code {
-            background: #2d3748;
-            color: #e2e8f0;
+            background: var(--text-dark);
+            color: var(--bg-muted);
             padding: 1rem;
             border-radius: 6px;
             font-family: 'Courier New', monospace;
@@ -102,7 +76,7 @@
         }
         .footer {
             text-align: center;
-            color: white;
+            color: var(--text-light);
             opacity: 0.8;
             padding: 2rem 0;
         }
@@ -115,12 +89,12 @@
             margin-left: 0.5rem;
         }
         .status-logged-in {
-            background: #c6f6d5;
-            color: #22543d;
+            background: var(--success-color);
+            color: var(--text-light);
         }
         .status-logged-out {
-            background: #fed7d7;
-            color: #742a2a;
+            background: var(--orono-brand-red);
+            color: var(--text-light);
         }
     </style>
 </head>

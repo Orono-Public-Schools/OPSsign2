@@ -124,13 +124,23 @@
                             await this.loadTemplate(this.config.template);
                         }
 
-                        // After the template is loaded (or if using the standard one),
-                        // initialize the Google Slide if an ID is configured.
-                        // This allows custom templates to either use their own content
-                        // or act as a container for a standard presentation.
-                        if (this.config.slideId) {
-                            console.log(`Initializing presentation for slideId: ${this.config.slideId}`);
-                            this.initializeSlide(this.config.slideId);
+                        // --- NEW: Initialize modules after template is loaded ---
+                        await this.initializeModules(); 
+                        
+                        // --- NEW: Initialize the info bar if it exists ---
+                        await this.initializeInfoBar();                        
+
+                        // If the template is 'rotation', its own script is responsible for handling content.
+                        // For other templates, initialize the slide if an ID is provided.
+                        if (this.config.template === 'rotation') {
+                            console.log('Rotation template loaded. Its internal script will manage content.');
+                            // The rotation template's script is now in control. It will use the
+                            // placeholders to construct its own content, including the slideshow.
+                        } else if (this.config.slideId) {
+                            // For standard, sidebar, etc., templates, we initialize the slide with looping ON.
+                            // These templates are expected to provide a #slideContainer element.
+                            console.log(`Initializing presentation for slideId: ${this.config.slideId} in template: ${this.config.template}`);
+                            this.initializeSlide(this.config.slideId, 'slideContainer', true);
                         } else {
                             console.log('No slideId configured. The template will display its default content.');
                             // For the standard template, not having a slideId is an error.
@@ -190,6 +200,126 @@
                 }
             }
             
+            async initializeModules() {
+                const moduleElements = document.querySelectorAll('[data-module]');
+                if (moduleElements.length === 0) {
+                    console.log('No content modules found in this template.');
+                    return;
+                }
+
+                console.log(`Found ${moduleElements.length} content modules to initialize.`);
+                const promises = [];
+
+                moduleElements.forEach(el => {
+                    const moduleType = el.dataset.module;
+                    switch (moduleType) {
+                        case 'menu':
+                            if (this.config.building) {
+                                promises.push(this.loadMenuModule(el, this.config.building));
+                            }
+                            break;
+                        case 'calendar':
+                            if (this.config.googleCalendarUrl) {
+                                promises.push(this.loadCalendarModule(el, this.config.googleCalendarUrl));
+                            }
+                            break;
+                        default:
+                            console.warn(`Unknown module type: ${moduleType}`);
+                    }
+                });
+
+                await Promise.all(promises);
+                console.log('All content modules initialized.');
+            }
+
+            async loadMenuModule(container, buildingCode) {
+                console.log(`Loading menu module for building: ${buildingCode}`);
+                container.innerHTML = '<div class="module-loading" style="padding:1em; text-align:center; color: #888;">Loading Menu...</div>';
+                try {
+                    const response = await fetch(`/api/menu?building=${buildingCode}`);
+                    if (response.ok) {
+                        const menuHtml = await response.text();
+                        container.innerHTML = menuHtml;
+                    } else {
+                        container.innerHTML = '<div class="module-error" style="padding:1em; text-align:center; color: #aaa;">Menu not available today.</div>';
+                    }
+                } catch (error) {
+                    console.error('Error loading menu module:', error);
+                    container.innerHTML = '<div class="module-error" style="padding:1em; text-align:center; color: #f00;">Could not load menu.</div>';
+                }
+            }
+
+            async loadCalendarModule(container, calendarUrl) {
+                console.log('Loading calendar module...');
+                container.innerHTML = ''; // Clear any loading message
+                try {
+                    const url = new URL(calendarUrl);
+                    url.searchParams.set('cacheBust', Date.now());
+                    
+                    const iframe = document.createElement('iframe');
+                    iframe.src = url.toString();
+                    iframe.style.cssText = 'width:100%; height:100%; border:0;';
+                    iframe.setAttribute('frameborder', '0');
+                    iframe.setAttribute('scrolling', 'no');
+                    
+                    container.appendChild(iframe);
+                } catch (error) {
+                    console.error('Error loading calendar module (invalid URL?):', error);
+                    container.innerHTML = '<div class="module-error" style="padding:1em; text-align:center; color: #f00;">Invalid Calendar URL.</div>';
+                }
+            }
+
+            async initializeInfoBar() {
+                const infoBar = document.getElementById('info-bar');
+                if (!infoBar) return;
+
+                console.log('Initializing info bar...');
+
+                const dateEl = document.getElementById('info-date');
+                const timeEl = document.getElementById('info-time');
+                const weatherEl = document.getElementById('info-weather');
+
+                // Function to update date and time
+                const updateDateTime = () => {
+                    const now = new Date();
+                    if (dateEl) {
+                        dateEl.textContent = now.toLocaleDateString('en-US', {
+                            weekday: 'long',
+                            month: 'long',
+                            day: 'numeric'
+                        });
+                    }
+                    if (timeEl) {
+                        timeEl.textContent = now.toLocaleTimeString('en-US', {
+                            hour: 'numeric',
+                            minute: '2-digit'
+                        }).replace(' ', ''); // Remove space before AM/PM
+                    }
+                };
+
+                updateDateTime(); // Initial call
+                setInterval(updateDateTime, 1000 * 30); // Update every 30 seconds is sufficient
+
+                // Load weather if configured
+                if (weatherEl && this.config.coordinates) {
+                    this.loadWeatherModule(weatherEl, this.config.coordinates);
+                    // Refresh weather every 15 minutes
+                    setInterval(() => this.loadWeatherModule(weatherEl, this.config.coordinates), 15 * 60 * 1000);
+                }
+            }
+
+            async loadWeatherModule(container, coordinates) {
+                try {
+                    const response = await fetch(`/api/weather?coords=${coordinates}`);
+                    if (response.ok) {
+                        const weather = await response.json();
+                        container.innerHTML = `<img src="${weather.icon.replace(',0',',1')}" alt="${weather.description}" class="weather-icon"><span class="weather-temp">${weather.temperature}°</span>`;
+                    }
+                } catch (error) {
+                    console.error('Error loading weather module:', error);
+                }
+            }            
+
             // ==================== SSE IMPLEMENTATION ====================
 
             initializeEventStream() {
@@ -508,19 +638,55 @@
                     if (response.ok) {
                         let templateText = await response.text();
 
+                        // --- Dynamic duration calculation for rotation template (in MILLISECONDS) ---
+                        // The template's script expects values for setTimeout, which uses milliseconds.
+                        // Use a shorter, more sensible fallback of 120 seconds (2 minutes) instead of 600 (10 minutes).
+                        // This prevents a long "hang" if the slide count API fails.
+                        let presentationDurationMs = (this.config.presentationDuration || 120) * 1000;
+                        let itemDurationMs = (this.config.rotationItemDuration || 15) * 1000;
+                    
+                        if (templateName === 'rotation' && this.config.slideId) {
+                            try {
+                                console.log('Rotation template: Fetching dynamic slide count...');
+                                const slideInfoResponse = await fetch(`/api/slide-info/${this.config.slideId}`);
+                                if (slideInfoResponse.ok) {
+                                    const slideInfo = await slideInfoResponse.json();
+                                    const slideCount = slideInfo.activeSlides || 0;
+                                    if (slideCount > 0) {
+                                        // Assuming 10 seconds per slide, convert to milliseconds.
+                                        const calculatedDurationMs = slideCount * 10 * 1000;
+                                        console.log(`Calculated presentation duration: ${slideCount} active slides * 10s = ${calculatedDurationMs / 1000}s`);
+                                        presentationDurationMs = calculatedDurationMs;
+                                    } else {
+                                        console.warn('Slide count was 0, using configured fallback duration of 120s.');
+                                    }
+                                } else {
+                                    console.warn('Failed to fetch slide count, using configured fallback duration of 120s.');
+                                }
+                            } catch (err) {
+                                console.error('Error fetching slide count, using configured fallback duration of 120s.', err);
+                            }
+                        }
+
+                        // The rotation template should not loop its slideshow, but others might.
+                        const loopSlides = (templateName !== 'rotation');                        
+
                         // Replace placeholders in the fetched template HTML.
                         templateText = templateText
                             .replace(/{LOCATION}/g, this.config.location || 'Orono Public Schools')
+                            .replace(/{BUILDING_NAME}/g, this.config.buildingName || '')                            
                             .replace(/{PRESENTATION_ID}/g, this.config.slideId || '')
                             .replace(/{DEVICE_ID}/g, this.config.deviceId)
-                            .replace(/{THEME_PATH}/g, `/themes/${this.config.theme || 'default'}.css`);
+                            .replace(/{THEME_PATH}/g, `/themes/${this.config.theme || 'default'}.css`)
+                            .replace(/{SLIDESHOW_LOOP_PARAM}/g, loopSlides ? 'true' : 'false')
+                            // Add rotation-specific placeholders. Pass values in milliseconds.
+                            .replace(/{PRESENTATION_DURATION}/g, presentationDurationMs.toString())
+                            .replace(/{ROTATION_ITEM_DURATION}/g, itemDurationMs.toString())
+                            .replace(/{GOOGLE_CALENDAR_URL}/g, this.config.googleCalendarUrl || '')
+                            .replace(/{BUILDING_CODE}/g, this.config.building || '');
 
-                        // CRITICAL FIX: The original implementation was flawed and destroyed the running script.
-                        // This new implementation parses the template and replaces the content of the
-                        // body safely, preserving the running script.
                         const parser = new DOMParser();
                         const templateDoc = parser.parseFromString(templateText, 'text/html');
-                        const templateBody = templateDoc.body;
 
                         // Grab the currently running script so we can preserve it.
                         const mainScript = document.querySelector('body > script:last-of-type');
@@ -528,13 +694,36 @@
                         // Clear the current body.
                         document.body.innerHTML = '';
 
-                        // Append the content from the template's body.
-                        while (templateBody.firstChild) {
-                            document.body.appendChild(templateBody.firstChild);
-                        }
+                        // NEW: Process and append styles from the template's <head>.
+                        // This ensures that styles defined within the template are applied.
+                        Array.from(templateDoc.head.childNodes).forEach(node => {
+                            if (node.nodeName.toLowerCase() === 'style' || (node.nodeName.toLowerCase() === 'link' && node.rel === 'stylesheet')) {
+                                document.head.appendChild(node.cloneNode(true));
+                            }
+                        });
+
+                        // Separate the template's body nodes from its scripts.
+                        // Scripts inserted this way don't execute, so they need special handling.
+                        const templateBodyNodes = Array.from(templateDoc.body.childNodes);
+                        const scriptsToExecute = [];
+
+                        templateBodyNodes.forEach(node => {
+                            if (node.nodeName.toLowerCase() === 'script') {
+                                scriptsToExecute.push(node);
+                            } else {
+                                document.body.appendChild(node.cloneNode(true));
+                            }
+                        });                        
 
                         // Re-append the main script to the new body.
                         if (mainScript) document.body.appendChild(mainScript);
+
+                        // Now, create and append new script elements to force execution.
+                        scriptsToExecute.forEach(scriptNode => {
+                            const newScript = document.createElement('script');
+                            newScript.textContent = scriptNode.textContent;
+                            document.body.appendChild(newScript);
+                        });
 
                         console.log(`Template "${templateName}" loaded successfully`);
                     } else {
@@ -576,21 +765,23 @@
                 document.head.appendChild(link);
             }
 
-            initializeSlide(slideId) {
-                const slideContainer = document.getElementById('slideContainer');
-                if (slideContainer) {
+            initializeSlide(slideId, containerId = 'slideContainer', loop = true) {
+                const slideContainer = document.getElementById(containerId);
+                // Only initialize if the container exists and doesn't already have an iframe.
+                if (slideContainer && !slideContainer.querySelector('iframe')) {
+                    const loopParam = loop ? 'true' : 'false';
                     slideContainer.innerHTML = `
                         <iframe
-                            src="https://docs.google.com/presentation/d/${slideId}/embed?start=true&loop=true&delayms=10000&rm=minimal"
+                            src="https://docs.google.com/presentation/d/${slideId}/embed?start=true&loop=${loopParam}&delayms=10000&rm=minimal"
                             frameborder="0"
                             width="100%"
                             height="100%"
                             allowfullscreen="true">
                         </iframe>
                     `;
-                    console.log(`Google Slide initialized: ${slideId}`);
+                    console.log(`Google Slide initialized in #${containerId} with loop=${loopParam}: ${slideId}`);
                 } else {
-                    console.error('Slide container not found');
+                    console.error(`Slide container #${containerId} not found`);
                 }
             }
 

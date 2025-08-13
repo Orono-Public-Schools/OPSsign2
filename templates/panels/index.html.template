@@ -1,0 +1,49 @@
+<head>
+    <meta charset="UTF-8">
+    <title>Panels Template</title>
+    <link rel="stylesheet" href="/css/modules.css">
+</head>
+
+<style>
+    /* Panels-specific layout using CSS Grid */
+    body {
+        display: grid;
+        width: 100vw;
+        height: 100vh;
+        grid-template-columns: 380px 1fr; /* Sidebar width and the rest */
+        grid-template-rows: 1fr 250px; /* Main content row and bottom bar height */
+        grid-template-areas:
+            "sidebar main"
+            "sidebar bottom";
+        gap: 10px;
+        padding: 10px;
+        /* The body background is black, this provides the space between panels */
+    }
+
+    .main-content { grid-area: main; }
+    .sidebar { grid-area: sidebar; display: flex; flex-direction: column; border-radius: 8px; }
+    .bottom-bar { grid-area: bottom; border-radius: 8px; }
+
+    /* The calendar module needs to fill the available vertical space in the sidebar */
+    .calendar-module-container {
+        flex-grow: 1;
+        min-height: 0; /* Important for flexbox overflow */
+    }
+</style>
+
+<div class="main-content">
+    <!-- The main slideshow will still load here automatically -->
+    <div id="slideContainer"></div>
+</div>
+<div class="sidebar">
+    <div class="sidebar-header">
+        <img src="/assets/OPS_banner_v1.png" alt="Orono Schools Logo" class="sidebar-logo">
+        <h1 class="building-name">{BUILDING_NAME}</h1>
+    </div>
+    <h2>Events</h2>
+    <div class="calendar-module-container" data-module="calendar"></div>
+</div>
+<div class="bottom-bar">
+    <h2>Today's Menu</h2>
+    <div data-module="menu"></div>
+</div>

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OPSsign2 Admin - Orono Public Schools</title>
     <link rel="stylesheet" href="/admin/admin.css">
+    <link rel="stylesheet" href="/shared-styles.css">
 </head>
 <body>
     <header class="header">
@@ -35,25 +36,30 @@
     <main class="main-content">
         <section class="overview-section">
             <div class="stats-grid">
-                <div class="stat-card">
+                <div class="card stat-card">
                     <h3>Total Devices</h3>
                     <div class="stat-number" id="totalDevices">-</div>
                 </div>
-                <div class="stat-card">
+                <div class="card stat-card">
                     <h3>Online</h3>
                     <div class="stat-number online" id="onlineDevices">-</div>
                 </div>
-                <div class="stat-card">
-                    <h3>SSE Connected</h3>
+                <div class="card stat-card">
+                    <h3>SSE</h3>
                     <div class="stat-number" id="sseConnected">-</div>
                 </div>
-                <div class="stat-card">
-                    <h3>Templates</h3>
-                    <div class="stat-number" id="totalTemplates">5</div>
-                </div>
-                <div class="stat-card">
+                <div class="card stat-card">
                     <h3>Buildings</h3>
                     <div class="stat-number" id="totalBuildings">-</div>
+                </div>
+                <!-- This card will be hidden by default and shown only for district admins -->
+                <div class="card stat-card" id="serviceInfoCard" style="display: none;">
+                    <h3>Service Account</h3>
+                    <div class="service-info-content">
+                        <p>Share Google Slides/Sheets with this email:</p>
+                        <strong id="serviceAccountEmail" class="service-account-email">Loading...</strong>
+                        <button id="copyServiceEmailBtn" class="btn btn-secondary btn-copy">Copy</button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -83,37 +89,6 @@
             <div class="devices-grid" id="devicesGrid">
                 <!-- Devices will be populated by JavaScript -->
                 <div class="loading" id="devicesLoading">Loading devices...</div>
-            </div>
-        </section>
-
-        <section class="templates-section"  style="display: none;"
-            <h2>Templates & Themes</h2>
-            <div class="templates-themes-grid">
-                <div class="template-card">
-                    <h3>Standard Template</h3>
-                    <p>Basic presentation with footer</p>
-                    <div class="template-preview">📱</div>
-                </div>
-                <div class="template-card">
-                    <h3>Sidebar Template</h3>
-                    <p>Presentation with weather sidebar</p>
-                    <div class="template-preview">📱</div>
-                </div>
-                <div class="template-card">
-                    <h3>Weather Template</h3>
-                    <p>Detailed weather information</p>
-                    <div class="template-preview">📱</div>
-                </div>
-                <div class="template-card">
-                    <h3>Announcement Template</h3>
-                    <p>Eye-catching announcements and alerts</p>
-                    <div class="template-preview">📢</div>
-                </div>
-                <div class="template-card">
-                    <h3>Full-Screen Template</h3>
-                    <p>Slideshow only, no branding or UI</p>
-                    <div class="template-preview">🖥️</div>
-                </div>
             </div>
         </section>
 
@@ -197,11 +172,11 @@
                 <div class="form-group">
                     <label for="template">Template</label>
                     <select id="template" name="template">
-                        <option value="standard">Standard</option>
-                        <option value="sidebar">Sidebar</option>
-                        <option value="weather">Weather</option>
-                        <option value="announcement">Announcement</option>
-                        <option value="fullscreen">Full-Screen</option>
+                        <option value="fullscreen">Fullscreen (Slides)</option>
+                        <option value="sidebar-menu">Sidebar:M (Slides + Menu)</option>
+                        <option value="sidebar-calendar">Sidebar:C (Slides + Calendar)</option>
+                        <option value="sidebar-rotate">Sidebar:R (Slides + Menu/Cal Rotate)</option>
+                        <option value="panels">Panels (Slides + Calendar + Menu)</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -215,6 +190,13 @@
                     <input type="text" id="slideId" name="slideId" 
                            placeholder="Extracted from link above, or enter manually">
                 </div>
+
+                <div class="form-group">
+                    <label for="googleCalendarUrl">Google Calendar URL (for templates with a calendar module)</label>
+                    <input type="url" id="googleCalendarUrl" name="googleCalendarUrl" placeholder="Paste the public calendar embed URL">
+                    <small>This is a per-device setting. Leave blank if this display's template does not use a calendar.</small>
+                </div>
+
                 <div class="form-group">
                     <label for="notes">Notes</label>
                     <textarea id="notes" name="notes" rows="3" placeholder="Internal notes about this device..."></textarea>

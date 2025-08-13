@@ -1,0 +1,87 @@
+<head>
+    <meta charset="UTF-8">
+    <title>Sidebar Rotating Template</title>
+    <link rel="stylesheet" href="/css/modules.css">
+    <link rel="stylesheet" href="/css/layout-sidebar.css">
+</head>
+
+<style>
+    /* Styles for the rotating module container */
+    .module-rotator {
+        flex-grow: 1; /* Allows the rotator to fill the remaining vertical space */
+        display: flex;
+        flex-direction: column;
+        min-height: 0; /* A flexbox fix to allow content to scroll properly if needed */
+        position: relative;
+    }
+
+    .rotating-module {
+        display: none; /* All modules are hidden by default; JS will show one */
+        flex-direction: column;
+        height: 100%; /* Each module should fill the rotator area */
+    }
+
+    /* Ensure the actual module content can grow to fill space */
+    .rotating-module > [data-module] {
+        flex-grow: 1;
+        min-height: 0; /* Another flexbox fix for scrolling */
+    }
+</style>
+
+<div class="flex-layout">
+    <div class="sidebar">
+        <div class="module-rotator">
+            <!-- Menu Module Wrapper -->
+            <div class="rotating-module" id="menu-module-wrapper">
+                <h2>Today's Menu</h2>
+                <div data-module="menu"></div>
+            </div>
+
+            <!-- Calendar Module Wrapper -->
+            <div class="rotating-module" id="calendar-module-wrapper">
+                <h2>Upcoming Events</h2>
+                <div data-module="calendar"></div>
+            </div>
+        </div>
+        <div class="sidebar-header">
+            <img src="/assets/OPS_banner_v1.png" alt="Orono Schools Logo" class="sidebar-logo">
+            <h1 class="building-name">{BUILDING_NAME}</h1>
+        </div>         
+    </div>
+    <div class="main-content">
+        <!-- The main slideshow will still load here automatically -->
+        <div id="slideContainer"></div>
+        <div id="info-bar">
+            <div id="info-date"></div>
+            <div id="info-weather"></div>
+            <div id="info-time"></div>
+        </div>        
+    </div>
+</div>
+
+<script>
+    (() => {
+        const rotationIntervalMs = 10000; // 10 seconds
+
+        const isMenuConfigured = "{BUILDING_CODE}" !== "";
+        const isCalendarConfigured = "{GOOGLE_CALENDAR_URL}" !== "";
+
+        const availableModules = [];
+        if (isMenuConfigured) availableModules.push(document.getElementById('menu-module-wrapper'));
+        if (isCalendarConfigured) availableModules.push(document.getElementById('calendar-module-wrapper'));
+
+        if (availableModules.length < 2) {
+            if (availableModules.length === 1) availableModules[0].style.display = 'flex';
+            return;
+        }
+
+        let currentIdx = 0;
+        availableModules[currentIdx].style.display = 'flex';
+        setInterval(() => {
+            availableModules[currentIdx].style.display = 'none';
+            currentIdx = (currentIdx + 1) % availableModules.length;
+            availableModules[currentIdx].style.display = 'flex';
+        }, rotationIntervalMs);
+    })();
+</script>
+

@@ -1,0 +1,27 @@
+<head>
+    <meta charset="UTF-8">
+    <title>Sidebar Calendar Template</title>
+    <link rel="stylesheet" href="/css/modules.css">
+    <link rel="stylesheet" href="/css/layout-sidebar.css">
+</head>
+
+<div class="flex-layout">
+    <div class="sidebar">   
+        <h2>Upcoming Events</h2>
+        <!-- The system will find this div and load the calendar module into it. -->
+        <div data-module="calendar"></div>
+        <div class="sidebar-header">
+            <img src="/assets/OPS_banner_v1.png" alt="Orono Schools Logo" class="sidebar-logo">
+            <h1 class="building-name">{BUILDING_NAME}</h1>
+        </div> 
+    </div>
+    <div class="main-content">
+        <!-- The main slideshow will still load here automatically -->
+        <div id="slideContainer"></div>
+        <div id="info-bar">
+            <div id="info-date"></div>
+            <div id="info-weather"></div>
+            <div id="info-time"></div>
+        </div>        
+    </div>
+</div>

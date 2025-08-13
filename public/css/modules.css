@@ -1,0 +1,202 @@
+/*
+  SHARED MODULE STYLES
+  Used by all templates with sidebar/panel components.
+*/
+
+/* --- General Theme & Body --- */
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #00284D; /* Orono dark blue - provides "gutter" color */
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    box-sizing: border-box;
+}
+
+*, *:before, *:after {
+    box-sizing: inherit;
+}
+
+/* --- Slideshow Container Fix --- */
+/* Ensures the slideshow iframe fills its designated area in any layout */
+#slideContainer {
+    width: 100%;
+    height: 100%;
+}
+
+#slideContainer iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    /* Zoom in slightly to crop out Google Slides' black letterbox bars */
+    transform: scale(1.05);
+    transform-origin: center;    
+}
+
+/* --- General Module Container Styling --- */
+.sidebar, .bottom-bar {
+    background-color: #00284D; /* Orono dark blue */
+    padding: 1.5em;
+    overflow-y: auto; /* Add scrollbar if content overflows */
+    display: flex;
+    flex-direction: column;
+    border-radius: 8px;    
+}
+
+/* --- New: Sidebar Header Styling --- */
+.sidebar-header {
+    text-align: center;
+    padding-bottom: 0;
+    margin-top: 1.5em;
+    background-color: #fff;
+    border-radius: 8px;
+    /*height: 120px; /* Set fixed height for alignment */
+    flex-shrink: 0; /* Prevent header from shrinking in flex column */
+}
+
+.sidebar-logo {
+    max-width: 350px; /* Increased from 80px for better visibility */
+    width: 100%; /* Ensures responsive behavior within the max-width */
+    height: auto;
+    margin-left: auto; /* Centers the logo horizontally */
+    margin-right: auto; /* Centers the logo horizontally */
+    margin-top: 0.5em;
+    padding: 0.5em; /* Adds some breathing room around the logo */
+    padding-bottom: 0;
+}
+
+.building-name {
+    font-size: 1.7rem;
+    color: #FFF;
+    margin: 0;
+    font-weight: 600;
+    background-color: #00284D;
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+    border: 4px solid #FFF;
+}
+
+/* --- Module Headers --- */
+.sidebar h2, .bottom-bar h2 {
+    margin-top: 0;
+    margin-bottom: 0.5em;
+    padding-bottom: 0.5em;
+    font-size: 2rem;
+    /* color: #FFC72C; /* Orono Gold */
+    color: #FFF;
+    text-align: center;
+}
+
+/* --- Menu Module Styling --- */
+.menu-section {
+    margin-bottom: 1.5em;
+}
+
+.menu-section-title {
+    font-size: 1.8rem; /* Slightly smaller than the main h2 */
+    color: #FFC72C; /* Orono Gold */
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    padding-bottom: 0.3em;
+    margin-bottom: 0.5em;
+}
+
+.menu-category h4 {
+    font-size: 1.4rem;
+    color: #fff;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+}
+
+.menu-category ul {
+    list-style: none;
+    padding-left: 0;
+    margin-left: 0.5em;
+}
+
+.menu-category li {
+    margin-bottom: 0.5em;
+    font-size: 1.1rem;
+    line-height: 1.4;
+}
+
+/* Ensure menu module also grows to fill space */
+[data-module="menu"] {
+    flex-grow: 1;
+    overflow-y: auto; /* Allow menu to scroll if it's too long */
+    min-height: 0; /* Flexbox fix to allow shrinking */
+    background-color: #FFF;
+    padding: 1em;
+    border-radius: 8px;
+    color: #333;
+}
+
+/* --- Calendar Module Styling --- */
+[data-module="calendar"] {
+    flex-grow: 1; /* Fill remaining vertical space */
+    padding: 0;
+    min-height: 0; /* Fixes flexbox overflow issue in some browsers */    
+}
+
+[data-module="calendar"] iframe {
+    background-color: #fff; /* Set a background for the calendar iframe */
+    border-radius: 4px;
+}
+
+/* --- Module Loading/Error State Styling --- */
+.module-loading, .module-error {
+    color: #aaa;
+    text-align: `;
+    padding: 2em 0;
+    font-style: italic;
+}
+.module-error h2 {
+    font-size: 1.2rem;
+    color: #ffc72c;
+    border-bottom: none;
+    margin: 0;
+}
+
+
+/* --- Info Bar Styling --- */
+#info-bar {
+    background-color: #00284D; /* Match sidebar color */
+    border-radius: 8px;
+    padding: 0 2em;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: #fff;
+    font-weight: 500;
+}
+
+#info-date {
+    font-size: 2rem;
+    text-align: left;
+}
+
+#info-weather {
+    display: flex;
+    align-items: center;
+    gap: 0.75em;
+    justify-content: center;
+}
+
+.weather-icon {
+    height: 60px;
+    width: auto;
+}
+
+.weather-temp {
+    font-size: 2rem;
+    font-weight: 600;
+}
+
+#info-time {
+    font-size: 2rem;
+    font-weight: 600;
+    text-align: right;
+}
+

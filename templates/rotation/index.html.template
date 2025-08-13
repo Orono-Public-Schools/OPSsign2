@@ -1,0 +1,205 @@
+<style>
+    /* Basic styles for the rotation template */
+    html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background-color: #000;
+    }
+    .rotation-container {
+        position: relative;
+        width: 100%;
+        height: 100%;
+    }
+    .rotation-item {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        border: none;
+        opacity: 0;
+        transition: opacity 0.5s ease-in-out;
+        visibility: hidden;
+    }
+    .rotation-item.active {
+        opacity: 1;
+        visibility: visible;
+    }
+    .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-family: sans-serif;
+        font-size: 1.5rem;
+        background-color: #000;
+        z-index: 10;
+    }
+</style>
+
+<div class="rotation-container" id="rotationContainer">
+    <div class="loading-overlay" id="rotationLoading">Loading Rotation...</div>
+    <!-- Content will be injected here by the script -->
+</div>
+
+<script>
+    (function() {
+        console.log('Rotation template script executing...');
+
+        const container = document.getElementById('rotationContainer');
+        if (!container) {
+            console.error('Rotation container not found!');
+            return;
+        }
+
+        const items = [];
+        const presentationDuration = parseInt('{PRESENTATION_DURATION}', 10);
+        const itemDuration = parseInt('{ROTATION_ITEM_DURATION}', 10);
+
+        // 1. Add Google Slides if ID is present
+        const slideId = "{PRESENTATION_ID}";
+        if (slideId) {
+            items.push({
+                type: 'slides',
+                // Use placeholders for loop parameter and ID. Standardize on 10s delay.
+                url: `https://docs.google.com/presentation/d/${slideId}/embed?start=true&loop={SLIDESHOW_LOOP_PARAM}&delayms=10000&rm=minimal`,
+                duration: presentationDuration
+            });
+        }
+
+        // 2. Add Google Calendar if URL is present
+        const calendarUrl = "{GOOGLE_CALENDAR_URL}";
+        if (calendarUrl) {
+            items.push({
+                type: 'calendar',
+                url: calendarUrl,
+                duration: itemDuration
+            });
+        }
+
+        // 3. Add API-driven Menu if building code is present
+        const buildingCode = "{BUILDING_CODE}";
+        // Only add the menu item if the building is one that has a student menu.
+        const buildingsWithMenus = ['HS', 'MS', 'IS', 'SE', 'DC'];
+        if (buildingCode && buildingsWithMenus.includes(buildingCode)) {
+            items.push({
+                type: 'api-menu',
+                url: `/api/menu?building=${buildingCode}`,
+                duration: itemDuration
+            });
+        }
+
+        // This function is now async to handle pre-flight checks
+        (async function initialize() {
+            console.log(`Found ${items.length} potential rotation items.`, items);
+
+            if (items.length === 0) {
+                container.innerHTML = '<div class="loading-overlay">No content configured for rotation.</div>';
+                return;
+            }
+
+            // --- NEW: Pre-flight check for API-based content ---
+            const validationPromises = items.map(async (item) => {
+                if (item.type === 'api-menu') {
+                    const menuUrl = `${item.url}&cacheBust=${Date.now()}`;
+                    try {
+                        const response = await fetch(menuUrl);
+                        if (response.ok) {
+                            // Menu exists, keep it and store the fetched HTML to avoid a second request
+                            item.prefetchedHtml = await response.text();
+                            return item;
+                        }
+                        console.log(`Pre-flight check failed for ${item.type} (URL: ${item.url}), removing from rotation.`);
+                        return null; // This item is invalid
+                    } catch (error) {
+                        console.error(`Pre-flight check error for ${item.type} (URL: ${item.url}), removing from rotation.`, error);
+                        return null; // This item is invalid
+                    }
+                }
+                // For non-API items, they are always valid
+                return item;
+            });
+
+            const validatedItems = (await Promise.all(validationPromises)).filter(Boolean); // filter(Boolean) removes nulls
+
+            console.log(`Rotation will run with ${validatedItems.length} valid items.`, validatedItems);
+
+            if (validatedItems.length === 0) {
+                container.innerHTML = '<div class="loading-overlay">No content is currently available for rotation.</div>';
+                return;
+            }
+
+            // Now, create iframes ONLY for the valid items and start the rotation
+            createIframesAndRunRotation(validatedItems);
+        })();
+
+        function createIframesAndRunRotation(validItems) {
+            container.innerHTML = ''; // Clear loading message
+            validItems.forEach((item, index) => {
+                const iframe = document.createElement('iframe');
+                iframe.src = 'about:blank';
+                iframe.dataset.src = item.url;
+                iframe.id = `rotation-item-${index}`;
+                iframe.className = 'rotation-item';
+                iframe.setAttribute('frameborder', '0');
+                iframe.setAttribute('allowfullscreen', 'true');
+                container.appendChild(iframe);
+            });
+
+            let currentIndex = -1;
+            function showNextItem() {
+                // Hide and reset the previous iframe
+                if (currentIndex > -1) {
+                    const currentIframe = document.getElementById(`rotation-item-${currentIndex}`);
+                    if (currentIframe) {
+                        currentIframe.classList.remove('active');
+                        currentIframe.src = 'about:blank';
+                        currentIframe.srcdoc = '';
+                    }
+                }
+
+                // Determine the next item to show
+                currentIndex = (currentIndex + 1) % validItems.length;
+                const nextIframe = document.getElementById(`rotation-item-${currentIndex}`);
+                const currentItem = validItems[currentIndex];
+
+                // Use prefetched content if available, otherwise load from src
+                if (currentItem.type === 'api-menu' && currentItem.prefetchedHtml) {
+                    nextIframe.srcdoc = currentItem.prefetchedHtml;
+                } else {
+                    let newSrc = nextIframe.dataset.src;
+                    // Add cache busting for calendar and slides to ensure they reload correctly.
+                    if (currentItem.type === 'calendar' || currentItem.type === 'slides') {
+                        try {
+                            const url = new URL(newSrc);
+                            url.searchParams.set('cacheBust', Date.now());
+                            newSrc = url.toString();
+                        } catch (e) {
+                            console.error("Could not parse URL for cache busting:", newSrc, e);
+                        }
+                    }
+                    nextIframe.src = newSrc;
+                }
+
+                nextIframe.classList.add('active');
+
+                const nextDuration = currentItem.duration;
+                if (isNaN(nextDuration) || nextDuration <= 0) {
+                    console.error(`Invalid duration for item ${currentIndex}: ${nextDuration}. Halting rotation.`);
+                    return;
+                }
+
+                setTimeout(showNextItem, nextDuration);
+            }
+            showNextItem();
+        }
+    })();
+</script>

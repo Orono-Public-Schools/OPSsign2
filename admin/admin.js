@@ -109,6 +109,11 @@ class AdminInterface {
             if (templatesSection) {
                 templatesSection.style.display = 'none';
             }
+        } else if (this.userPermissions.level === 'district') {
+            // For district admins, show the service info card and fetch the email
+            const serviceInfoCard = document.getElementById('serviceInfoCard');
+            if (serviceInfoCard) serviceInfoCard.style.display = 'block';
+            this.loadServiceInfo();            
         }
 
         // Set up form building options
@@ -248,6 +253,33 @@ class AdminInterface {
         }
     }
 
+    async loadServiceInfo() {
+        try {
+            const response = await fetch('/api/admin/service-info');
+            const serviceEmailEl = document.getElementById('serviceAccountEmail');
+            
+            if (response.ok) {
+                const data = await response.json();
+                if (serviceEmailEl) {
+                    serviceEmailEl.textContent = data.serviceAccountEmail;
+                }
+            } else {
+                if (serviceEmailEl) {
+                    serviceEmailEl.textContent = 'Could not load email.';
+                    serviceEmailEl.classList.add('error');
+                }
+            }
+        } catch (error) {
+            console.error('Error loading service account info:', error);
+            const serviceEmailEl = document.getElementById('serviceAccountEmail');
+            if (serviceEmailEl) {
+                serviceEmailEl.textContent = 'Error loading email.';
+                serviceEmailEl.classList.add('error');
+            }
+        }
+    }
+
+
     filterDisplays() {
         this.renderDevices();
     }
@@ -301,7 +333,7 @@ class AdminInterface {
 
         filteredDevices.forEach(device => {
             const card = document.createElement('div');
-            card.className = 'device-card';
+            card.className = 'card'; // Use shared card style
 
             // Helper function to create info rows
             const createInfo = (label, value, valueClass = '') => {
@@ -324,10 +356,10 @@ class AdminInterface {
                 </div>
                 <div class="device-details"></div>
                 <div class="device-actions">
-                    <button class="edit-btn" data-action="edit" data-id="${device.deviceId}">Edit</button>
-                    <button class="delete-btn" data-action="delete" data-id="${device.deviceId}">Delete</button>
-                    <button class="refresh-btn" data-action="push-refresh" data-id="${device.deviceId}" title="Push Refresh via SSE">📡</button>
-                    <button class="view-btn" data-action="view" data-id="${device.deviceId}">View</button>
+                    <button class="btn btn-secondary" data-action="edit" data-id="${device.deviceId}">Edit</button>
+                    <button class="btn btn-danger" data-action="delete" data-id="${device.deviceId}">Delete</button>
+                    <button class="btn btn-secondary" data-action="push-refresh" data-id="${device.deviceId}" title="Push Refresh via SSE">📡 Refresh</button>
+                    <button class="btn" data-action="view" data-id="${device.deviceId}">View</button>
                 </div>
             `;
 
@@ -413,12 +445,11 @@ class AdminInterface {
                 </div>
                 
                 <div class="alert-actions">
-                    <button class="edit-btn" data-action="edit" data-id="${alert.alertId}">Edit</button>
-                    <button class="toggle-btn ${alert.active ? 'deactivate' : 'activate'}" data-action="toggle" data-id="${alert.alertId}" data-active="${!alert.active}">
+                    <button class="btn btn-secondary" data-action="edit" data-id="${alert.alertId}">Edit</button>
+                    <button class="btn ${alert.active ? 'btn-danger' : 'btn-success'}" data-action="toggle" data-id="${alert.alertId}" data-active="${!alert.active}">
                         ${alert.active ? 'Deactivate' : 'Activate'}
                     </button>
-                    <button class="delete-btn" data-action="delete" data-id="${alert.alertId}">Delete</button>
-                </div>
+                    <button class="btn btn-danger" data-action="delete" data-id="${alert.alertId}">Delete</button>
             `;
 
             card.querySelector('h3').textContent = alert.name || '[No Name]';
@@ -521,6 +552,9 @@ class AdminInterface {
         // Reset form
         document.getElementById('deviceForm').reset();
         document.getElementById('active').checked = true;
+
+        // Hide rotation fields by default for new devices
+        document.getElementById('rotationFields').style.display = 'none';
         
         // Pre-fill building if only one option
         const buildingSelect = document.getElementById('building');
@@ -645,7 +679,10 @@ class AdminInterface {
         document.getElementById('presentationLink').value = device.presentationLink || '';
         document.getElementById('slideId').value = device.slideId || '';
         document.getElementById('active').checked = device.active;
-        
+
+        // Populate general module fields
+        document.getElementById('googleCalendarUrl').value = device.googleCalendarUrl || '';
+     
         document.getElementById('deviceModal').classList.add('show');
     }
 
@@ -941,7 +978,9 @@ document.addEventListener('DOMContentLoaded', function() {
             template: formData.get('template'),
             presentationLink: formData.get('presentationLink'),
             slideId: formData.get('slideId'),
-            active: formData.has('active')
+            active: formData.has('active'),
+            // General module fields
+            googleCalendarUrl: formData.get('googleCalendarUrl')
         };
         
         adminInterface.saveDevice(data);
@@ -1005,6 +1044,44 @@ document.addEventListener('DOMContentLoaded', function() {
     if (alertTypeSelect) {
         alertTypeSelect.addEventListener('change', (e) => {
             adminInterface.toggleAlertFields(e.target.value);
+        });
+    }
+
+    // Copy service account email
+    const copyBtn = document.getElementById('copyServiceEmailBtn');
+    if (copyBtn) {
+        copyBtn.addEventListener('click', () => {
+            const emailText = document.getElementById('serviceAccountEmail').textContent;
+            if (!emailText || emailText.includes('...')) return;
+
+            const showSuccess = () => {
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+            };
+
+            // Use modern clipboard API if available (requires HTTPS)
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(emailText).then(showSuccess).catch(err => {
+                    console.error('Async clipboard copy failed: ', err);
+                    alert('Failed to copy email.');
+                });
+            } else {
+                // Fallback for non-secure contexts (HTTP)
+                try {
+                    const textArea = document.createElement("textarea");
+                    textArea.value = emailText;
+                    textArea.style.position = "fixed"; // Prevent scrolling to bottom
+                    document.body.appendChild(textArea);
+                    textArea.focus();
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    showSuccess();
+                } catch (err) {
+                    console.error('Fallback copy failed: ', err);
+                    alert('Failed to copy email.');
+                }                
+            }
         });
     }
 

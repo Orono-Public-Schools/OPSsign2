@@ -6,10 +6,20 @@ const axios = require('axios');
 const { google } = require('googleapis');
 const path = require('path');
 const ping = require('ping');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// --- New: Building to Nutrislice school mapping ---
+const SCHOOL_SLUG_MAP = {
+  'HS': 'orono-high-school',
+  'MS': 'orono-middle-school',
+  'IS': 'orono-intermediate-school',
+  'SE': 'schumann-elementary',
+  'DC': 'discovery-center'
+};
 
 const deviceStatuses = new Map();
 const deviceIPs = new Map();
@@ -22,6 +32,15 @@ const BUILDING_GROUPS = {
   'HS': 'sign-hs@orono.k12.mn.us',
   'DC': 'sign-dc@orono.k12.mn.us',
   'DO': 'sign-do@orono.k12.mn.us'
+};
+
+const BUILDING_NAMES = {
+  'SE': 'Schumann Elementary',
+  'IS': 'Intermediate School',
+  'MS': 'Middle School',
+  'HS': 'High School',
+  'DC': 'Discovery Center',
+  'DO': 'District Office'
 };
 
 const ADMIN_GROUP = 'sign-admin@orono.k12.mn.us';
@@ -479,25 +498,27 @@ setInterval(() => {
 // Google Sheets helper functions
 let auth = null;
 let sheets = null;
+let slidesApi = null;
 
 // Initialize Google Sheets API
-async function initializeGoogleSheets() {
+async function initializeGoogleApis() {
   try {
     const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL;
     const serviceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
 
     if (serviceAccountEmail && serviceAccountKey) {
-      console.log('🔄 Attempting to initialize Google Sheets API with service account...');
+      console.log('🔄 Attempting to initialize Google APIs with service account...');
       // Initialize service account - simplified approach
       try {
         const serviceAccountPath = './service-account-key.json';
-        const auth = new google.auth.GoogleAuth({
+        auth = new google.auth.GoogleAuth({
           keyFile: serviceAccountPath,
-          scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+          scopes: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/presentations.readonly'],
         });
 
         sheets = google.sheets({ version: 'v4', auth });
-        console.log('✅ Google Sheets API initialized successfully with service account');
+        slidesApi = google.slides({ version: 'v1', auth });
+        console.log('✅ Google Sheets & Slides APIs initialized successfully with service account');
       } catch (authError) {
         console.error('❌ Service account authentication failed:', authError.message);
         sheets = null;
@@ -508,7 +529,7 @@ async function initializeGoogleSheets() {
     }
   } catch (error) {
     console.error('❌ Failed to initialize Google Sheets API:', error.message);
-    console.log('ℹ️  Falling back to manual mode');
+    console.log('ℹ️  Falling back to public API mode');
     sheets = null;
   }
 }
@@ -566,15 +587,21 @@ async function addDeviceToSheet(deviceData) {
     deviceData.coordinates || '',     // H: coordinates
     deviceData.notes || '',           // I: notes
     deviceData.building || '',        // J: building
-    deviceData.name || ''             // K: displayname
+    deviceData.name || '',             // K: displayname
+    deviceData.googleCalendarUrl || '', // L
+    '',                                // M: menuConfig (no longer used)
+    deviceData.presentationDuration || 600, // N (default 10 mins)
+    deviceData.rotationItemDuration || 15 // O (default 15 secs)
   ];
 
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${nextRow}:K${nextRow}`,
+    range: `${sheetName}!A${nextRow}:O${nextRow}`,
     valueInputOption: 'RAW',
     resource: {
-      values: [rowData]
+      values: [
+        rowData
+      ]
     }
   };
 
@@ -625,15 +652,22 @@ async function updateDeviceInSheet(deviceId, deviceData) {
     deviceData.coordinates || '',     // H: coordinates
     deviceData.notes || '',           // I: notes
     deviceData.building || '',        // J: building
-    deviceData.name || ''             // K: displayname
+    deviceData.name || '',             // K: displayname
+    deviceData.googleCalendarUrl || '', // L
+    '',                                // M: menuConfig (no longer used)
+    deviceData.presentationDuration || 600, // N
+    deviceData.rotationItemDuration || 15 // O
   ];
 
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${targetRow}:K${targetRow}`,
+    range: `${sheetName}!A${targetRow}:O${targetRow}`,
     valueInputOption: 'RAW',
     resource: {
-      values: [rowData]
+      values: [rowData],
+      values: [
+        rowData
+      ]
     }
   };
 
@@ -1321,7 +1355,6 @@ app.get('/', (req, res) => {
   console.log('Homepage path:', path.join(__dirname, 'homepage.html'));
 
   // Check if homepage file exists
-  const fs = require('fs');
   const homepagePath = path.join(__dirname, 'homepage.html');
 
   if (fs.existsSync(homepagePath)) {
@@ -1372,6 +1405,9 @@ app.get('/api/device-config/:deviceId', async (req, res) => {
       // Process the configuration to handle slide IDs from URLs
       const deviceConfig = processDeviceConfig(rawDeviceConfig);
       
+      // Add building name to the config
+      deviceConfig.buildingName = BUILDING_NAMES[deviceConfig.building] || deviceConfig.building;
+            
       // Get alerts for this device's building
       const deviceAlerts = getAlertsForBuilding(alerts, deviceConfig.building);
       
@@ -1393,6 +1429,7 @@ app.get('/api/device-config/:deviceId', async (req, res) => {
         refreshInterval: 15,
         location: 'Orono Public Schools',
         building: '',
+        buildingName: 'Unconfigured Device',
         alerts: [], // No alerts for unconfigured devices
         lastUpdated: new Date().toISOString()
       };
@@ -1411,6 +1448,7 @@ app.get('/api/device-config/:deviceId', async (req, res) => {
       refreshInterval: 15,
       location: 'Orono Public Schools',
       building: '',
+      buildingName: 'Error Loading Config',
       alerts: [],
       lastUpdated: new Date().toISOString(),
       error: 'Failed to load from Google Sheets'
@@ -1643,6 +1681,41 @@ app.get('/api/admin/user-info', requireAuthWithPermissions, (req, res) => {
     permissions: req.userPermissions
   });
 });
+
+// API route to get service account info (district admin only)
+app.get('/api/admin/service-info', requireAuthWithPermissions, (req, res) => {
+  // This endpoint is highly sensitive and should only be available to district admins.
+  if (req.userPermissions.level !== 'district') {
+    return res.status(403).json({
+      error: 'Access Denied',
+      message: 'You do not have permission to view service account information.'
+    });
+  }
+
+  try {
+    // Read the email directly from the service account JSON file.
+    // This is more reliable than environment variables which might not be set correctly.
+    const serviceAccountPath = path.join(__dirname, 'service-account-key.json');
+    if (fs.existsSync(serviceAccountPath)) {
+      const serviceAccount = require(serviceAccountPath); // require() caches the file read
+      const serviceAccountEmail = serviceAccount.client_email;
+
+      if (serviceAccountEmail) {
+        return res.json({ serviceAccountEmail });
+      }
+    }
+    // If we reach here, the file or the email within it was not found.
+    throw new Error('service-account-key.json not found or is missing client_email.');
+
+  } catch (error) {
+    console.error('Error reading service account info:', error.message);
+    res.status(404).json({
+      error: 'Not Found',
+      message: 'Service account key file is not configured correctly on the server.'
+    });
+  }
+});
+
 
 // ==================== ALERT API ROUTES ====================
 
@@ -2049,6 +2122,180 @@ app.post('/api/admin/alerts/:alertId/deploy', requireAuthWithPermissions, async 
 
 // ==================== END ALERT API ROUTES ====================
 
+// API route to get slide count for a presentation
+app.get('/api/slide-info/:slideId', async (req, res) => {
+  const { slideId } = req.params;
+  if (!slidesApi) {
+    return res.status(503).json({ error: 'Google Slides API service is not available.' });
+  }
+
+  try {
+    console.log(`Fetching slide info for presentation: ${slideId}`);
+    const presentation = await slidesApi.presentations.get({
+      presentationId: slideId,
+      fields: 'slides.slideProperties.isSkipped' // Only request the necessary fields
+    });
+
+    if (!presentation.data.slides) {
+      return res.json({ slideId, activeSlides: 0, totalSlides: 0 });
+    }
+
+    const totalSlides = presentation.data.slides.length;
+    // Filter out slides that are marked as "skipped" in the presentation
+    const activeSlides = presentation.data.slides.filter(slide => !slide.slideProperties.isSkipped);
+    const activeSlideCount = activeSlides.length;
+
+    console.log(`📊 Slide info for ${slideId}: Total ${totalSlides} slides, ${activeSlideCount} active.`);
+
+    res.json({
+      slideId: slideId,
+      activeSlides: activeSlideCount,
+      totalSlides: totalSlides
+    });
+  } catch (error) {
+    console.error(`Error fetching slide info for ${slideId}:`, error.message);
+    res.status(404).json({ error: 'Could not retrieve presentation details. Check if the Slide ID is correct and the presentation is shared with the service account.' });
+  }
+});
+
+/**
+ * Fetches a menu from the Nutrislice API and formats it as HTML.
+ * @param {string} schoolSlug - The Nutrislice slug for the school (e.g., 'orono-high-school').
+ * @param {string} mealType - The type of meal ('breakfast' or 'lunch').
+ * @param {object} dateInfo - An object containing year, month, day, and yyyymmdd string.
+ * @returns {Promise<string|null>} - A promise that resolves to the HTML string or null if no menu is found.
+ */
+async function fetchAndFormatNutrisliceMenu(schoolSlug, mealType, dateInfo) {
+  const { year, month, day, yyyymmdd } = dateInfo;
+  const apiUrl = `https://orono.api.nutrislice.com/menu/api/weeks/school/${schoolSlug}/menu-type/${mealType}/${year}/${month}/${day}/?format=json`;
+
+  try {
+      const { data } = await axios.get(apiUrl);
+
+      // Find today's menu data within the 'days' array
+      const todayData = data.days.find(d => d.date === yyyymmdd);
+      if (!todayData || !todayData.menu_items || todayData.menu_items.length === 0) {
+          return null; // No menu items for today
+      }
+
+      // Group food items by category
+      const itemsByCategory = {};
+      todayData.menu_items.forEach(item => {
+          if (!item.food || !item.food.name) return;
+          const category = item.menu_category ? item.menu_category.name : 'Uncategorized';
+          
+          if (!itemsByCategory[category]) {
+              itemsByCategory[category] = [];
+          }
+          itemsByCategory[category].push(item.food.name);
+      });
+
+      if (Object.keys(itemsByCategory).length === 0) return null;
+
+      // Build HTML from the grouped items
+      let html = '';
+      for (const category in itemsByCategory) {
+          html += `<div class="menu-category"><h4>${category}</h4><ul>`;
+          itemsByCategory[category].forEach(foodName => {
+              html += `<li>${foodName}</li>`;
+          });
+          html += `</ul></div>`;
+      }
+      
+      return html;
+  } catch (error) {
+      if (error.response && error.response.status === 404) {
+          console.log(`No ${mealType} menu found via API for ${schoolSlug} on ${yyyymmdd}.`);
+      } else {
+          console.error(`Error fetching Nutrislice API for ${mealType} (${apiUrl}):`, error.message);
+      }
+      return null; // Return null on any error to prevent breaking the display
+  }
+}
+
+// --- New: Building-aware menu API endpoint ---
+app.get('/api/menu', async (req, res) => {
+const { building } = req.query;
+
+if (!building) return res.status(400).send('Building parameter is required.');
+
+const schoolSlug = SCHOOL_SLUG_MAP[building];
+if (!schoolSlug) return res.status(404).send(`No menu configuration found for building: ${building}`);
+
+try {
+  const today = new Date();
+  const dateInfo = {
+      year: today.getFullYear(),
+      month: String(today.getMonth() + 1), // API uses 1-12 for month
+      day: String(today.getDate()),
+      yyyymmdd: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  };
+
+  console.log(`Fetching menus for building ${building} (${schoolSlug}) on ${dateInfo.yyyymmdd}`);
+  const [breakfastHtml, lunchHtml] = await Promise.all([
+      fetchAndFormatNutrisliceMenu(schoolSlug, 'breakfast', dateInfo),
+      fetchAndFormatNutrisliceMenu(schoolSlug, 'lunch', dateInfo)
+  ]);
+
+  let combinedHtml = '';
+  if (breakfastHtml) combinedHtml += `<div class="menu-section"><h2 class="menu-section-title">Breakfast</h2>${breakfastHtml}</div>`;
+  if (lunchHtml) combinedHtml += `<div class="menu-section"><h2 class="menu-section-title">Lunch</h2>${lunchHtml}</div>`;
+
+  if (combinedHtml) {
+    res.setHeader('Content-Type', 'text/html');
+    res.send(combinedHtml);
+  } else {
+    const fullDateString = today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    res.status(404).send(`<div class="module-error"><h2>No menus available for ${fullDateString}.</h2></div>`);
+  }
+} catch (error) {
+  console.error(`Error during menu fetch for building ${building}:`, error.message);
+  res.status(500).send(`<div class="module-error"><h2>Error</h2><p>Could not load menu.</p></div>`);
+}
+});
+
+// --- New: Weather API Endpoint ---
+app.get('/api/weather', async (req, res) => {
+  const { coords } = req.query;
+  if (!coords) {
+    return res.status(400).json({ error: 'Coordinates are required.' });
+  }
+
+  const [lat, lon] = coords.split(',');
+  if (!lat || !lon) {
+    return res.status(400).json({ error: 'Invalid coordinates format. Use "lat,lon".' });
+  }
+
+  try {
+    // NWS API requires a User-Agent header.
+    const apiHeaders = { 'User-Agent': 'OPSsign2/1.0 (orono.k12.mn.us)' };
+
+    // Step 1: Get the gridpoint URL from weather.gov
+    const pointsUrl = `https://api.weather.gov/points/${lat},${lon}`;
+    const pointsResponse = await axios.get(pointsUrl, { headers: apiHeaders });
+    const forecastUrl = pointsResponse.data.properties.forecastHourly;
+
+    if (!forecastUrl) throw new Error('Could not retrieve forecast URL from weather.gov');
+
+    // Step 2: Get the hourly forecast from the gridpoint URL
+    const forecastResponse = await axios.get(forecastUrl, { headers: apiHeaders });
+    const currentForecast = forecastResponse.data.properties.periods[0];
+
+    if (!currentForecast) throw new Error('No current forecast data available.');
+
+    const weatherData = {
+      temperature: currentForecast.temperature,
+      unit: currentForecast.temperatureUnit,
+      description: currentForecast.shortForecast,
+      icon: currentForecast.icon // This is a URL to a weather icon
+    };
+    res.json(weatherData);
+  } catch (error) {
+    console.error(`Weather API error for coords ${coords}:`, error.message);
+    res.status(500).json({ error: 'Failed to retrieve weather data.' });
+  }
+});
+
 // Simple test route
 app.get('/simple-test', (req, res) => {
   res.send(`
@@ -2149,8 +2396,9 @@ app.listen(port, '0.0.0.0', async () => {
   console.log(`🔐 Login URL: http://sign.orono.k12.mn.us:${port}/auth/google`);
   console.log(`📡 SSE endpoint: http://sign.orono.k12.mn.us:${port}/api/device/{deviceId}/events`);
 
-  // Initialize Google Sheets API
-  await initializeGoogleSheets();
+  
+  // Initialize Google APIs
+  await initializeGoogleApis();
 
   // Initialize ping monitoring
   console.log(`🏓 Starting ping monitoring...`);
