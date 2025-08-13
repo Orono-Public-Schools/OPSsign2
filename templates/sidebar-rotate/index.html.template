@@ -61,27 +61,45 @@
 
 <script>
     (() => {
-        const rotationIntervalMs = 10000; // 10 seconds
+        // Use a globally-scoped variable to store the interval ID.
+        // This prevents multiple timers from running if the script is re-initialized.
+        if (window.sidebarRotationIntervalId) {
+            clearInterval(window.sidebarRotationIntervalId);
+        }
+
+        const rotationIntervalMs = 15000; // 15 seconds per module
 
         const isMenuConfigured = "{BUILDING_CODE}" !== "";
         const isCalendarConfigured = "{GOOGLE_CALENDAR_URL}" !== "";
 
         const availableModules = [];
+        // Only add modules to the rotation if they are configured for this device        
         if (isMenuConfigured) availableModules.push(document.getElementById('menu-module-wrapper'));
         if (isCalendarConfigured) availableModules.push(document.getElementById('calendar-module-wrapper'));
 
+        // If there are fewer than 2 modules, there's nothing to rotate.
         if (availableModules.length < 2) {
+            // If there's only one module, make sure it's visible and stop.
             if (availableModules.length === 1) availableModules[0].style.display = 'flex';
             return;
         }
 
         let currentIdx = 0;
-        availableModules[currentIdx].style.display = 'flex';
-        setInterval(() => {
-            availableModules[currentIdx].style.display = 'none';
-            currentIdx = (currentIdx + 1) % availableModules.length;
+
+        const rotateModules = () => {
+            // Hide all modules first to handle any state inconsistencies
+            availableModules.forEach(module => module.style.display = 'none');
+            // Show the current one
             availableModules[currentIdx].style.display = 'flex';
-        }, rotationIntervalMs);
+            // Prepare for the next rotation
+            currentIdx = (currentIdx + 1) % availableModules.length;
+        };
+
+        // Show the first module immediately without waiting for the first interval
+        rotateModules();
+
+        // Start the rotation and store the ID on the window object
+        window.sidebarRotationIntervalId = setInterval(rotateModules, rotationIntervalMs);
     })();
 </script>
 
