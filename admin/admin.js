@@ -9,16 +9,16 @@ class AdminInterface {
         this.currentBuildingFilter = '';
         this.editingDevice = null;
         this.editingAlert = null;
-        
-        this.buildingInfo = {
-            'SE': { name: 'Schumann Elementary', level: 'elementary' },
-            'IS': { name: 'Intermediate School', level: 'elementary' }, 
-            'MS': { name: 'Middle School', level: 'secondary' },
-            'HS': { name: 'High School', level: 'secondary' },
-            'DC': { name: 'Discovery Center', level: 'other' },
-            'DO': { name: 'District Office', level: 'other' }
-        };
-        
+        this.buildingNames = {}; // Will be populated from API
+    }
+
+    getSortedBuildings() {
+        if (!this.userPermissions || !this.userPermissions.buildings) {
+            return [];
+        }
+        return this.userPermissions.buildings
+            .map(code => ({ code, name: this.buildingNames[code] || code }))
+            .sort((a, b) => a.name.localeCompare(b.name));
     }
 
     async init() {
@@ -62,7 +62,9 @@ class AdminInterface {
                 
                 // Store permissions for future use
                 this.userPermissions = data.permissions;
+                this.buildingNames = data.buildingNames || {};
                 console.log('User permissions:', this.userPermissions);
+                console.log('Building names loaded:', this.buildingNames);
             } else {
                 throw new Error('Failed to load user info');
             }
@@ -89,7 +91,7 @@ class AdminInterface {
                 }
             } else {
                 const buildingNames = this.userPermissions.buildings.map(code => 
-                    this.buildingInfo[code]?.name || code
+                    this.buildingNames[code] || code
                 ).join(', ');
                 if (userPermission) {
                     userPermission.textContent = `Building Admin: ${buildingNames}`;
@@ -135,12 +137,14 @@ class AdminInterface {
             console.log('User only has access to one building, no filter needed');
             return;
         }
+
+        buildingSelect.innerHTML = '<option value="">All Buildings</option>';
         
         // Add options for each building the user can access
-        this.userPermissions.buildings.forEach(code => {
+        this.getSortedBuildings().forEach(building => {
             const option = document.createElement('option');
-            option.value = code;
-            option.textContent = this.buildingInfo[code]?.name || code;
+            option.value = building.code;
+            option.textContent = building.name;
             buildingSelect.appendChild(option);
         });
     
@@ -155,15 +159,16 @@ class AdminInterface {
     
     setupBuildingOptions() {
         // Update device form building dropdown
+        const buildings = this.getSortedBuildings();
         const buildingSelect = document.getElementById('building');
         if (buildingSelect) {
             buildingSelect.innerHTML = '';
     
             // Add options only for buildings user can access
-            this.userPermissions.buildings.forEach(code => {
+            buildings.forEach(building => {            
                 const option = document.createElement('option');
-                option.value = code;
-                option.textContent = `${code} - ${this.buildingInfo[code]?.name || code}`;
+                option.value = building.code;
+                option.textContent = `${building.code} - ${building.name}`;
                 buildingSelect.appendChild(option);
             });
         } else {
@@ -174,20 +179,20 @@ class AdminInterface {
         const buildingSelection = document.getElementById('buildingSelection');
         if (buildingSelection) {
             buildingSelection.innerHTML = '';
-    
-            this.userPermissions.buildings.forEach(code => {
+
+            buildings.forEach(building => {
                 const label = document.createElement('label');
                 label.className = 'checkbox-label building-checkbox';
                 
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
                 checkbox.name = 'buildings';
-                checkbox.value = code;
+                checkbox.value = building.code;
                 
                 const span = document.createElement('span');
                 span.className = 'checkmark';
                 
-                const text = document.createTextNode(`${code} - ${this.buildingInfo[code]?.name || code}`);
+                const text = document.createTextNode(`${building.code} - ${building.name}`);
                 
                 label.appendChild(checkbox);
                 label.appendChild(span);
@@ -365,7 +370,7 @@ class AdminInterface {
 
             // Safely set text content
             card.querySelector('h3').textContent = device.name;
-            card.querySelector('.device-building').textContent = `${device.deviceId} • ${device.building} - ${this.buildingInfo[device.building]?.name || device.building}`;
+            card.querySelector('.device-building').textContent = `${device.deviceId} • ${device.building} - ${this.buildingNames[device.building] || device.building}`;
 
             const details = card.querySelector('.device-details');
             details.appendChild(createInfo('ID', device.deviceId));
@@ -1007,7 +1012,7 @@ document.addEventListener('DOMContentLoaded', function() {
             data.slideId = formData.get('slideId');
         } else if (type === 'custom') {
             data.title = formData.get('title');
-            data.text = formData.get('text');
+            data.text = document.getElementById('alertText').value; // Get from the correct textarea
             data.icon = formData.get('icon');
         } else if (type === 'srp') {
             data.srpAction = formData.get('srpAction');

@@ -161,6 +161,8 @@ html, body {
 [data-module="calendar"] iframe {
     background-color: #fff; /* Set a background for the calendar iframe */
     border-radius: 4px;
+    /* Explicitly hide scrollbars that may appear on some browser engines (e.g., webOS) */
+    overflow: hidden;    
 }
 
 /* --- Module Loading/Error State Styling --- */

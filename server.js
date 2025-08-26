@@ -12,7 +12,8 @@ require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 3000;
 
-// --- New: Building to Nutrislice school mapping ---
+// Building to Nutrislice school mapping ---
+// Note: District Office is mapped to the IS menu
 const SCHOOL_SLUG_MAP = {
   'HS': 'orono-high-school',
   'MS': 'orono-middle-school',
@@ -31,7 +32,8 @@ const BUILDING_GROUPS = {
   'MS': 'sign-ms@orono.k12.mn.us',
   'HS': 'sign-hs@orono.k12.mn.us',
   'DC': 'sign-dc@orono.k12.mn.us',
-  'DO': 'sign-do@orono.k12.mn.us'
+  'DO': 'sign-do@orono.k12.mn.us',
+  'AC': 'sign-ac@orono.k12.mn.us'
 };
 
 const BUILDING_NAMES = {
@@ -40,7 +42,8 @@ const BUILDING_NAMES = {
   'MS': 'Middle School',
   'HS': 'High School',
   'DC': 'Discovery Center',
-  'DO': 'District Office'
+  'DO': 'District Office',
+  'AC': 'Activity Center'
 };
 
 const ADMIN_GROUP = 'sign-admin@orono.k12.mn.us';
@@ -482,6 +485,27 @@ app.post('/api/admin/push/refresh-all', requireAuthWithPermissions, (req, res) =
 
 // ==================== END SSE IMPLEMENTATION ====================
 
+// New: SSE Heartbeat to keep connections alive and prevent timeouts.
+// This sends a small "ping" message to every connected client periodically.
+// This prevents the server, or any intermediate proxies/firewalls, from
+// thinking the connection is idle and closing it.
+setInterval(() => {
+  const data = { type: 'ping', timestamp: Date.now() };
+  const message = `data: ${JSON.stringify(data)}\n\n`;
+  
+  connectedDevices.forEach((connection, deviceId) => {
+    try {
+      // Write the ping message to the client
+      connection.response.write(message);
+      // Update the last ping time to prevent our own cleanup from removing it
+      connection.lastPing = Date.now();
+    } catch (err) {
+      console.error(`❌ Error sending heartbeat to ${deviceId}, removing connection.`, err.message);
+      connectedDevices.delete(deviceId);
+    }
+  });
+}, 30000); // Send a ping every 30 seconds
+
 // Periodic cleanup of stale SSE connections
 setInterval(() => {
   const now = Date.now();
@@ -589,7 +613,7 @@ async function addDeviceToSheet(deviceData) {
     deviceData.building || '',        // J: building
     deviceData.name || '',             // K: displayname
     deviceData.googleCalendarUrl || '', // L
-    '',                                // M: menuConfig (no longer used)
+    deviceData.active ? 'TRUE' : 'FALSE', // M: active
     deviceData.presentationDuration || 600, // N (default 10 mins)
     deviceData.rotationItemDuration || 15 // O (default 15 secs)
   ];
@@ -654,7 +678,7 @@ async function updateDeviceInSheet(deviceId, deviceData) {
     deviceData.building || '',        // J: building
     deviceData.name || '',             // K: displayname
     deviceData.googleCalendarUrl || '', // L
-    '',                                // M: menuConfig (no longer used)
+    deviceData.active ? 'TRUE' : 'FALSE', // M: active
     deviceData.presentationDuration || 600, // N
     deviceData.rotationItemDuration || 15 // O
   ];
@@ -1103,7 +1127,7 @@ async function getUserBuildingPermissions(userEmail) {
       // User is district admin - has access to all buildings
       const permissions = {
         level: 'district',
-        buildings: ['SE', 'IS', 'MS', 'HS', 'DC', 'DO'],
+        buildings: ['SE', 'IS', 'MS', 'HS', 'DC', 'DO', 'AC'],
         isAdmin: true
       };
       
@@ -1307,6 +1331,12 @@ function parseSheetData(rows) {
       device[header] = row[index] || '';
     });
 
+        // Convert 'active' from string 'TRUE'/'FALSE' to a proper boolean.
+    // This ensures client-side logic (like checking a box) works reliably.
+    if (device.hasOwnProperty('active')) {
+      device.active = (device.active === 'TRUE' || device.active === true);
+    }
+
     // Normalize the display name. Prefer 'displayname', fall back to 'deviceId'.
     device.name = device.displayname || device.name || device.deviceId;
 
@@ -1464,7 +1494,8 @@ app.get('/api/user', requireAuthWithPermissions, (req, res) => {
     name: req.user.displayName,
     email: req.user.emails[0].value,
     photo: req.user.photos[0].value,
-    permissions: req.userPermissions
+    permissions: req.userPermissions,
+    buildingNames: BUILDING_NAMES
   });
 });
 
@@ -1669,17 +1700,6 @@ app.delete('/api/admin/devices/:deviceId', requireAuthWithPermissions, async (re
       details: error.message
     });
   }
-});
-
-app.get('/api/admin/user-info', requireAuthWithPermissions, (req, res) => {
-  res.json({
-    user: {
-      name: req.user.displayName,
-      email: req.user.emails[0].value,
-      photo: req.user.photos[0].value
-    },
-    permissions: req.userPermissions
-  });
 });
 
 // API route to get service account info (district admin only)
@@ -2195,7 +2215,12 @@ async function fetchAndFormatNutrisliceMenu(schoolSlug, mealType, dateInfo) {
       // Build HTML from the grouped items
       let html = '';
       for (const category in itemsByCategory) {
-          html += `<div class="menu-category"><h4>${category}</h4><ul>`;
+        html += `<div class="menu-category">`;
+        // Only show the category heading if it's not "Uncategorized"
+        if (category.toLowerCase() !== 'uncategorized') {
+            html += `<h4>${category}</h4>`;
+        }
+        html += `<ul>`;
           itemsByCategory[category].forEach(foodName => {
               html += `<li>${foodName}</li>`;
           });
@@ -2215,7 +2240,7 @@ async function fetchAndFormatNutrisliceMenu(schoolSlug, mealType, dateInfo) {
 
 // --- New: Building-aware menu API endpoint ---
 app.get('/api/menu', async (req, res) => {
-  const { building } = req.query;
+  const { building, testDate } = req.query;
 
   if (!building) return res.status(400).send('Building parameter is required.');
 
@@ -2225,6 +2250,9 @@ app.get('/api/menu', async (req, res) => {
   if (building === 'DO') {
     console.log(`Menu request for District Office (DO), redirecting to Intermediate School (IS) menu.`);
     effectiveBuilding = 'IS';
+  } else if (building === 'AC') {
+    console.log(`Menu request for Activity Center (AC), redirecting to High School (HS) menu.`);
+    effectiveBuilding = 'HS';
   }
 
   const schoolSlug = SCHOOL_SLUG_MAP[effectiveBuilding];
@@ -2232,7 +2260,19 @@ app.get('/api/menu', async (req, res) => {
   if (!schoolSlug) return res.status(404).send(`No menu configuration found for building: ${building}`);
 
 try {
-  const today = new Date();
+  let today;
+  // Allow overriding the date for testing purposes with a 'testDate=YYYY-MM-DD' query param.
+  if (testDate && /^\d{4}-\d{2}-\d{2}$/.test(testDate)) {
+    console.log(`Using test date for menu lookup: ${testDate}`);
+    // Split the date string to avoid timezone issues with the Date constructor.
+    // new Date('YYYY-MM-DD') can be off by a day depending on the server's timezone.
+    const parts = testDate.split('-').map(part => parseInt(part, 10));
+    // new Date(year, monthIndex, day) is safer.
+    today = new Date(parts[0], parts[1] - 1, parts[2]);
+  } else {
+    today = new Date();
+  }
+
   const dateInfo = {
       year: today.getFullYear(),
       month: String(today.getMonth() + 1), // API uses 1-12 for month
