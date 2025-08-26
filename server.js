@@ -118,23 +118,12 @@ async function requireAuthWithPermissions(req, res, next) {
   console.log('Auth check with permissions - isAuthenticated:', req.isAuthenticated());
   
   if (!req.isAuthenticated()) {
-    console.log('User not authenticated, showing login page');
+    console.log('User not authenticated, redirecting to login');
+    // Store the original URL they were trying to access
     req.session.returnTo = req.originalUrl;
-    
-    return res.send(`
-      <html>
-        <head><title>OPSsign2 Login</title></head>
-        <body style="font-family: Arial; text-align: center; margin-top: 100px;">
-          <h1>OPSsign2 Admin Login</h1>
-          <p>Please sign in with your Orono Public Schools account</p>
-          <a href="/auth/google" style="background: #4285f4; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
-            Sign in with Google
-          </a>
-          <br><br>
-          <a href="/" style="color: #666;">← Back to Homepage</a>
-        </body>
-      </html>
-    `);
+    // Redirect them to the Google authentication page
+    return res.redirect('/auth/google');
+
   }
 
   try {
@@ -225,9 +214,18 @@ setInterval(() => {
 
 
 // Authentication routes
-app.get('/auth/google',
-  passport.authenticate('google', { scope: ['profile', 'email'] })
-);
+app.get('/auth/google', (req, res, next) => {
+  // If a returnTo is not already set in the session (e.g., by a protected route),
+  // it means the user likely clicked a direct login link (like on the homepage).
+  // In this case, we'll default to sending them to the admin page after login,
+  // which is the most common destination.
+  if (!req.session.returnTo) {
+    req.session.returnTo = '/admin';
+  }
+  
+  // Now, proceed with the standard Google authentication flow.
+  passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
+});
 
 app.get('/auth/google/callback',
   passport.authenticate('google', {
@@ -237,8 +235,12 @@ app.get('/auth/google/callback',
   (req, res) => {
     console.log('OAuth callback successful for:', req.user.emails[0].value);
 
-    // Check if there's a 'returnTo' parameter to redirect back to where they came from
-    const returnTo = req.session.returnTo || '/';
+    // After a successful login, we need to redirect the user.
+    // We prioritize the `returnTo` URL stored in the session, which is set
+    // when they try to access a protected page like `/admin` before logging in.
+    // If `returnTo` is not set (e.g., they clicked a generic "Login" button),
+    // we default to sending them to the admin dashboard, not the homepage.
+    const returnTo = req.session.returnTo || '/admin';
     delete req.session.returnTo;
 
     res.redirect(returnTo);
