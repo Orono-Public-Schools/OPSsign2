@@ -361,9 +361,9 @@ class AdminInterface {
                 </div>
                 <div class="device-details"></div>
                 <div class="device-actions">
-                    <button class="btn btn-secondary" data-action="edit" data-id="${device.deviceId}">Edit</button>
+                    <button class="btn btn-secondary btn-edit" data-action="edit" data-id="${device.deviceId}">Edit</button>
                     <button class="btn btn-danger" data-action="delete" data-id="${device.deviceId}">Delete</button>
-                    <button class="btn btn-secondary" data-action="push-refresh" data-id="${device.deviceId}" title="Push Refresh via SSE">📡 Refresh</button>
+                    <button class="btn btn-refresh btn-secondary" data-action="push-refresh" data-id="${device.deviceId}" title="Push Refresh via SSE">Refresh</button>
                     <button class="btn" data-action="view" data-id="${device.deviceId}">View</button>
                 </div>
             `;
@@ -412,6 +412,8 @@ class AdminInterface {
                 alertTypeDisplay = `Custom: ${alert.title || ''}`;
             } else if (alert.type === 'srp') {
                 alertTypeDisplay = `SRP: ${alert.srpAction || 'Alert'}`;
+        } else if (alert.type === 'big-game') {
+            alertTypeDisplay = 'Big Game (Hudl)';
             }
 
             const card = document.createElement('div');
@@ -464,6 +466,39 @@ class AdminInterface {
 
             alertsGrid.appendChild(card);
         });
+
+    }
+
+    handleTemplateChange(templateValue) {
+        const slideIdGroup = document.getElementById('slideId-group');
+        const slideIdLabel = slideIdGroup.querySelector('label');
+        const slideIdInput = document.getElementById('slideId');
+        const presentationLinkGroup = document.getElementById('presentationLink').parentElement;
+        const hudlInstructionsLink = document.getElementById('hudlInstructionsLink');
+        const streamUrlGroup = document.getElementById('streamUrl-group');
+
+        // Hide all special groups first
+        slideIdGroup.style.display = 'none';
+        presentationLinkGroup.style.display = 'none';
+        if (hudlInstructionsLink) hudlInstructionsLink.style.display = 'none';
+        if (streamUrlGroup) streamUrlGroup.style.display = 'none';
+
+        if (templateValue === 'hudl') {
+            slideIdGroup.style.display = 'block';
+            slideIdLabel.textContent = 'Hudl Game URL';
+            slideIdInput.placeholder = 'Paste the full Hudl game URL here';
+            if (hudlInstructionsLink) hudlInstructionsLink.style.display = 'inline';
+        } else if (templateValue === 'live-tv' || templateValue === 'athletics-schedule') {
+            // Show only the stream URL field for stream-based templates
+            // The 'athletics-schedule' template also uses this for its own purposes.
+            if (streamUrlGroup) streamUrlGroup.style.display = 'block';
+        } else {
+            // Default behavior for slide-based templates
+            slideIdGroup.style.display = 'block';
+            slideIdLabel.textContent = 'Google Slides ID';
+            slideIdInput.placeholder = 'Extracted from link above, or enter manually';
+            presentationLinkGroup.style.display = 'block';
+        }
     }
 
     async updateSSEStats() {
@@ -495,6 +530,20 @@ class AdminInterface {
         } catch (error) {
             console.error('Error pushing refresh to all:', error);
             this.showError(`Failed to push refresh: ${error.message}`);
+        }
+    }
+
+    async hardRefreshAll() {
+        if (!confirm('This will force all connected displays to perform a full page reload. This is useful for clearing stubborn caches after making stream or network changes. Are you sure?')) return;
+        try {
+            const response = await fetch('/api/admin/push/hard-refresh-all', { method: 'POST' });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.details || err.error);
+            }
+            this.showSuccessMessage('Hard refresh command sent to all connected displays.');
+        } catch (error) {
+            this.showError(`Failed to send hard refresh: ${error.message}`);
         }
     }
     async pushRefreshToDevice(deviceId) {
@@ -558,8 +607,9 @@ class AdminInterface {
         document.getElementById('deviceForm').reset();
         document.getElementById('active').checked = true;
 
-        // Hide rotation fields by default for new devices
-        document.getElementById('rotationFields').style.display = 'none';
+        // Set initial state for template fields
+        const templateSelect = document.getElementById('template');
+        this.handleTemplateChange(templateSelect.value);
         
         // Pre-fill building if only one option
         const buildingSelect = document.getElementById('building');
@@ -683,7 +733,11 @@ class AdminInterface {
         document.getElementById('template').value = device.template;
         document.getElementById('presentationLink').value = device.presentationLink || '';
         document.getElementById('slideId').value = device.slideId || '';
+        document.getElementById('streamUrl').value = device.streamUrl || '';
         document.getElementById('active').checked = device.active;
+
+        // Set initial state for template fields
+        this.handleTemplateChange(device.template);    
 
         // Populate general module fields
         document.getElementById('googleCalendarUrl').value = device.googleCalendarUrl || '';
@@ -743,11 +797,12 @@ class AdminInterface {
     
 
     toggleAlertFields(type) {
-        const fieldsets = ['custom', 'srp', 'slide'];
+        const fieldsets = ['custom', 'srp', 'slide', 'big-game'];
         const slideIdInput = document.getElementById('alertSlideId');
         const alertTitleInput = document.getElementById('alertTitle');
         const alertTextInput = document.getElementById('alertText');
         const srpActionInput = document.getElementById('srpAction');
+        const hudlUrlInput = document.getElementById('alertHudlUrl');
 
         // Hide all fieldsets
         fieldsets.forEach(id => {
@@ -765,6 +820,7 @@ class AdminInterface {
         if (alertTitleInput) alertTitleInput.required = (type === 'custom');
         if (alertTextInput) alertTextInput.required = (type === 'custom');
         if (srpActionInput) srpActionInput.required = (type === 'srp');
+        if (hudlUrlInput) hudlUrlInput.required = (type === 'big-game');
     }
 
     editAlert(alertId) {
@@ -787,7 +843,7 @@ class AdminInterface {
 
 
         // New: handle alert type
-        const alertType = alert.type || 'slide'; // Default to slide for old alerts
+        const alertType = alert.type || 'slide'; // Default to slide for legacy alerts
         document.getElementById('alertType').value = alertType;
         this.toggleAlertFields(alertType);
 
@@ -801,6 +857,8 @@ class AdminInterface {
         } else if (alertType === 'srp') {
             document.getElementById('srpAction').value = alert.srpAction || 'Hold';
             document.getElementById('srpText').value = alert.text || '';
+        } else if (alertType === 'big-game') {
+            document.getElementById('alertHudlUrl').value = alert.hudlUrl || '';
         }
         
         // Set building checkboxes
@@ -985,7 +1043,8 @@ document.addEventListener('DOMContentLoaded', function() {
             slideId: formData.get('slideId'),
             active: formData.has('active'),
             // General module fields
-            googleCalendarUrl: formData.get('googleCalendarUrl')
+            googleCalendarUrl: formData.get('googleCalendarUrl'),
+            streamUrl: formData.get('streamUrl')
         };
         
         adminInterface.saveDevice(data);
@@ -1017,6 +1076,8 @@ document.addEventListener('DOMContentLoaded', function() {
         } else if (type === 'srp') {
             data.srpAction = formData.get('srpAction');
             data.text = document.getElementById('srpText').value; // Get from the correct textarea
+        } else if (type === 'big-game') {
+            data.hudlUrl = formData.get('hudlUrl');
         }
 
         adminInterface.saveAlert(data);
@@ -1049,6 +1110,14 @@ document.addEventListener('DOMContentLoaded', function() {
     if (alertTypeSelect) {
         alertTypeSelect.addEventListener('change', (e) => {
             adminInterface.toggleAlertFields(e.target.value);
+        });
+    }
+
+    // Add event listener for template change in device modal
+    const templateSelect = document.getElementById('template');
+    if (templateSelect) {
+        templateSelect.addEventListener('change', () => {
+            adminInterface.handleTemplateChange(templateSelect.value);
         });
     }
 
@@ -1104,7 +1173,8 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('selectSecondaryBtn').addEventListener('click', () => adminInterface.selectSecondaryBuildings());
 
     document.getElementById('pushRefreshBtn').addEventListener('click', () => adminInterface.pushRefreshToAll());
-    document.getElementById('checkSseBtn').addEventListener('click', () => adminInterface.checkSSEStatus());
+    document.getElementById('hardRefreshBtn').addEventListener('click', () => adminInterface.hardRefreshAll());
+    //document.getElementById('checkSseBtn').addEventListener('click', () => adminInterface.checkSSEStatus());
 
     // Listen for clicks on the empty state buttons
     document.getElementById('devicesGrid').addEventListener('click', (e) => {
@@ -1152,4 +1222,29 @@ document.addEventListener('DOMContentLoaded', function() {
             adminInterface.toggleAlert(id, active);
         }
     });
+
+
+    // Event listeners for Hudl Instructions Modal
+    const hudlInstructionsLink = document.getElementById('hudlInstructionsLink');
+    const hudlInstructionsModal = document.getElementById('hudlInstructionsModal');
+    const closeHudlInstructionsBtn = document.getElementById('closeHudlInstructionsBtn');
+
+    if (hudlInstructionsLink && hudlInstructionsModal && closeHudlInstructionsBtn) {
+        hudlInstructionsLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            hudlInstructionsModal.classList.add('show');
+        });
+
+        closeHudlInstructionsBtn.addEventListener('click', () => {
+            hudlInstructionsModal.classList.remove('show');
+        });
+
+        // Also close if clicking outside the modal content
+        window.addEventListener('click', (e) => {
+            if (e.target === hudlInstructionsModal) {
+                hudlInstructionsModal.classList.remove('show');
+            }
+        });
+    }
+
 });

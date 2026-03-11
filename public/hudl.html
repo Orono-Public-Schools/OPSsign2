@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hudl Embed URL Parser</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+    <div class="w-full max-w-2xl mx-auto p-6 md:p-8">
+        <div class="bg-white rounded-xl shadow-lg p-8">
+            <div class="text-center mb-8">
+                <h1 class="text-3xl font-bold text-gray-800">Hudl Livestream Embedder</h1>
+                <p class="text-gray-500 mt-2">Paste your public Hudl URL to get the embed code for digital signage.</p>
+            </div>
+
+            <!-- Input Section -->
+            <div class="space-y-4">
+                <div>
+                    <label for="hudlUrl" class="block text-sm font-medium text-gray-700 mb-1">Public Hudl URL</label>
+                    <input type="text" id="hudlUrl" class="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150" placeholder="https://fan.hudl.com/...">
+                </div>
+                <button id="parseButton" class="w-full bg-blue-600 text-white font-semibold py-3 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-transform transform hover:scale-105">
+                    Generate Embed Code
+                </button>
+            </div>
+
+            <!-- Result Section -->
+            <div id="result" class="mt-8 hidden fade-in">
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-800 mb-2">Embeddable URL</h3>
+                        <div class="flex items-center bg-gray-100 p-3 rounded-lg">
+                            <input readonly id="embedUrl" type="text" class="w-full bg-transparent text-gray-700 border-0 focus:ring-0">
+                            <button onclick="copyToClipboard('embedUrl')" class="ml-4 px-3 py-1.5 text-sm font-medium text-white bg-gray-500 rounded-md hover:bg-gray-600">Copy</button>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-800 mb-2">Iframe Embed Code</h3>
+                        <div class="flex items-start bg-gray-100 p-3 rounded-lg">
+                            <textarea readonly id="iframeCode" class="w-full bg-transparent text-gray-700 border-0 focus:ring-0 resize-none" rows="4"></textarea>
+                            <button onclick="copyToClipboard('iframeCode')" class="ml-4 mt-1 px-3 py-1.5 text-sm font-medium text-white bg-gray-500 rounded-md hover:bg-gray-600">Copy</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Error Message -->
+            <div id="error" class="mt-6 text-center text-red-600 font-medium hidden fade-in"></div>
+            
+             <!-- Toast Notification for Copying -->
+            <div id="toast" class="fixed bottom-5 right-5 bg-gray-800 text-white px-5 py-3 rounded-lg shadow-xl transition-opacity duration-300 opacity-0">
+                Copied to clipboard!
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- DOM Elements ---
+        const hudlUrlInput = document.getElementById('hudlUrl');
+        const parseButton = document.getElementById('parseButton');
+        const resultDiv = document.getElementById('result');
+        const errorDiv = document.getElementById('error');
+        const embedUrlOutput = document.getElementById('embedUrl');
+        const iframeCodeOutput = document.getElementById('iframeCode');
+
+        // --- Event Listener ---
+        parseButton.addEventListener('click', parseHudlUrl);
+        hudlUrlInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                parseHudlUrl();
+            }
+        });
+
+        /**
+         * Parses the Hudl URL from the input field to generate an embeddable URL and iframe code.
+         */
+        function parseHudlUrl() {
+            const urlString = hudlUrlInput.value.trim();
+            
+            // Clear previous results
+            resultDiv.classList.add('hidden');
+            errorDiv.classList.add('hidden');
+
+            if (!urlString) {
+                showError("Please paste a Hudl URL first.");
+                return;
+            }
+
+            try {
+                const url = new URL(urlString);
+                const params = new URLSearchParams(url.search);
+                const base64String = params.get('b');
+
+                if (!base64String) {
+                    showError("Invalid Hudl URL. The 'b' parameter is missing.");
+                    return;
+                }
+
+                // Decode the Base64 string and extract the ID
+                const decodedString = atob(base64String);
+                const videoId = decodedString.replace('Broadcast', '');
+
+                if (!videoId || !/^\d+$/.test(videoId)) {
+                    showError("Could not extract a valid video ID from the URL.");
+                    return;
+                }
+
+                // Construct the final URLs
+                const embedUrl = `https://vcloud.hudl.com/broadcast/embed/${videoId}?windowed=true`;
+                const iframeHtml = `<iframe src="${embedUrl}" width="100%" height="100%" frameborder="0" allowfullscreen></iframe>`;
+
+                // Display the results
+                embedUrlOutput.value = embedUrl;
+                iframeCodeOutput.value = iframeHtml;
+                resultDiv.classList.remove('hidden');
+
+            } catch (error) {
+                console.error("Parsing error:", error);
+                showError("The URL seems to be invalid. Please check and try again.");
+            }
+        }
+        
+        /**
+         * Displays an error message to the user.
+         * @param {string} message - The error message to display.
+         */
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+        }
+
+        /**
+         * Copies the content of a given element's ID to the clipboard.
+         * @param {string} elementId - The ID of the element to copy content from.
+         */
+        function copyToClipboard(elementId) {
+            const element = document.getElementById(elementId);
+            // Use a temporary textarea to preserve formatting and ensure copy works
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = element.value;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            // Use execCommand for broader browser compatibility in this environment
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+            
+            // Show toast notification
+            const toast = document.getElementById('toast');
+            toast.classList.remove('opacity-0');
+            setTimeout(() => {
+                toast.classList.add('opacity-0');
+            }, 2000);
+        }
+    </script>
+</body>
+</html>

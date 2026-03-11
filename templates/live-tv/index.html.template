@@ -1,0 +1,77 @@
+<head>
+    <meta charset="UTF-8">
+    <title>Live TV Stream</title>
+    <link rel="stylesheet" href="/css/modules.css">
+    <!-- Use the lightweight and standard hls.js library -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        /* Template-specific styles for fullscreen video */
+        body, html {
+            overflow: hidden;
+            background-color: #000;
+        }
+        #video-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        #video {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+
+<!-- This hidden container is required to make the template compatible with the main app script -->
+<div id="slideContainer" style="display: none;"></div>
+
+<div id="video-container">
+    <video id="video" autoplay playsinline></video>
+</div>
+
+<script>
+    // This function will initialize the video player.
+    function initializePlayer() {
+        console.log('Live TV template: "templateReady" event received. Initializing with hls.js.');
+        const video = document.getElementById('video');
+        const deviceConfig = window.deviceConfig; // Now guaranteed to be available
+        const streamUrl = deviceConfig?.streamUrl;
+
+        console.log('Attempting to load stream. URL from config:', streamUrl);
+
+        if (streamUrl) {
+            // Use the robust FFmpeg proxy, which provides a clean, compliant stream.
+            const base64Url = btoa(streamUrl);
+            const proxiedUrl = `/api/hls-proxy/${base64Url}/index.m3u8`;
+            console.log('Using proxied URL:', proxiedUrl);
+            
+            if (Hls.isSupported()) {
+                const hls = new Hls();
+
+                // Basic error handling for hls.js
+                hls.on(Hls.Events.ERROR, function (event, data) {
+                    if (data.fatal) {
+                        console.error(`HLS.js FATAL ERROR: Type: ${data.type}, Details: ${data.details}`);
+                        document.getElementById('video-container').innerHTML = `<div class="module-error"><h2>Stream Error</h2><p>Could not load the video stream. Please check the stream source and network connection.</p><p style="font-size: 0.8em; color: #aaa;">Details: ${data.details}</p></div>`;
+                    }
+                });
+
+                hls.loadSource(proxiedUrl);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    video.play().catch(e => console.error("Autoplay was prevented:", e));
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Fallback for native HLS support (e.g., Safari)
+                video.src = proxiedUrl;
+            }
+        } else {
+            document.getElementById('video-container').innerHTML = '<div class="module-error"><h2>Configuration Error</h2><p>No stream URL has been configured for this device.</p></div>';
+        }
+    }
+
+    window.addEventListener('templateReady', initializePlayer, { once: true });
+</script>

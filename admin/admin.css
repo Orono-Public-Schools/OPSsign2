@@ -160,6 +160,11 @@ body {
     /* Color is inherited from shared-styles.css */
 }
 
+/* Device Filter section */
+.filter-container {
+    margin-bottom: 1em;
+}
+
 /* Add some space between the major sections */
 .devices-section {
     margin-bottom: 3rem;
@@ -846,4 +851,15 @@ form {
 
 .btn-copy {
     margin-left: 0.5rem;
+}
+
+.instructions-link {
+    font-size: 0.8em;
+    margin-left: 8px;
+    color: var(--primary-color);
+    text-decoration: none;
+}
+.instructions-list {
+    padding-left: 20px;
+    line-height: 1.6;
 }

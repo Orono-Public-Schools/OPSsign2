@@ -74,12 +74,15 @@
                             <option value="">All Buildings</option>
                         </select>
                     </div>
-                    <button id="pushRefreshBtn" class="btn btn-secondary">
-                        📡 Push Refresh to All
+                    <button id="pushRefreshBtn" class="btn btn-secondary btn-refresh">
+                        Refresh All
                     </button>
-                    <button id="checkSseBtn" class="btn btn-info">
+                    <button id="hardRefreshBtn" class="btn btn-warning btn-refresh" title="Forces all displays to do a full page reload, clearing caches. Use this after making encoder or network changes.">
+                        Hard Refresh All
+                    </button>
+                    <!--<button id="checkSseBtn" class="btn btn-info">
                         📊 Check SSE Status
-                    </button>
+                    </button> -->
                     <button id="addDeviceBtn" class="btn btn-primary" >
                         <span>+</span> Add Device
                     </button>
@@ -172,7 +175,15 @@
                         <option value="sidebar-calendar">Sidebar:C (Slides + Calendar)</option>
                         <option value="sidebar-rotate">Sidebar:R (Slides + Menu/Cal Rotate)</option>
                         <option value="panels">Panels (Slides + Calendar + Menu)</option>
+                        <option value="hudl">Hudl Livestream</option>
+                        <option value="live-tv">Live TV Stream</option>
+                        <option value="athletics-schedule">Athletics Schedule</option>
                     </select>
+                </div>
+                <div class="form-group" id="streamUrl-group" style="display: none;">
+                    <label for="streamUrl">Stream URL</label>
+                    <input type="url" id="streamUrl" name="streamUrl" 
+                           placeholder="e.g., http://10.17.0.8/h3.m3u8">
                 </div>
                 <div class="form-group">
                     <label for="presentationLink">Google Slides Link (Optional)</label>
@@ -180,12 +191,13 @@
                            placeholder="Paste the full Google Slides sharing link here">
                     <div id="urlValidation" class="validation-feedback"></div>
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="slideId-group">
                     <label for="slideId">Google Slides ID</label>
+                    <a href="#" id="hudlInstructionsLink" class="instructions-link" style="display: none;">(Instructions)</a>                    
                     <input type="text" id="slideId" name="slideId" 
                            placeholder="Extracted from link above, or enter manually">
                 </div>
-
+               
                 <div class="form-group">
                     <label for="googleCalendarUrl">Google Calendar URL (for templates with a calendar module)</label>
                     <input type="url" id="googleCalendarUrl" name="googleCalendarUrl" placeholder="Paste the public calendar embed URL">
@@ -229,6 +241,7 @@
                         <option value="srp">Standard Response Protocol</option>
                         <option value="custom">Custom Message</option>
                         <option value="slide">Google Slide</option>
+                        <option value="big-game">Big Game (Hudl)</option>
                     </select>
                 </div>
 
@@ -277,6 +290,14 @@
                     <div class="form-group">
                         <label for="alertSlideId">Google Slides ID</label>
                         <input type="text" id="alertSlideId" name="slideId" placeholder="Google Slides ID for this alert">
+                    </div>
+                </div>
+
+                <!-- Fields for Big Game (Hudl) -->
+                <div id="alert-fields-big-game" class="alert-fields" style="display: none;">
+                    <div class="form-group">
+                        <label for="alertHudlUrl">Hudl Game URL</label>
+                        <input type="text" id="alertHudlUrl" name="hudlUrl" placeholder="Paste the full Hudl game URL here">
                     </div>
                 </div>
                 
@@ -331,6 +352,27 @@
             <button onclick="window.location.reload()" class="retry-btn">Retry</button>
         </div>
     </div>
+
+
+    <!-- Hudl Instructions Modal -->
+    <div id="hudlInstructionsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>How to get the Hudl Game URL</h3>
+                <span id="closeHudlInstructionsBtn" class="modal-close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <ol class="instructions-list">
+                    <li>Go to the <a href="https://fan.hudl.com/usa/mn/long-lake/organization/7342/orono-high-school/" target="_blank" rel="noopener noreferrer">HUDL Fan Page</a>.</li>
+                    <li>In the right "Upcoming/Past" sidebar, click on the title of the game you want to show.</li>
+                    <li>Right-click on the video preview and click "Open in new window".</li>
+                    <li>A window which just shows the video and an address bar will pop up. Select the entire address in the address bar and press CTRL-C to copy it.</li>
+                    <li>Return to the OPSsign window and paste the URL you just copied into the "Hudl Game URL" box.</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+    
     <script src="/admin/admin.js"></script>
 </body>
 </html>

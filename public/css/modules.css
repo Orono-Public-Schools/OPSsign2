@@ -111,17 +111,20 @@ html, body {
     margin-bottom: 1.5em;
 }
 
-.menu-section-title {
+/* Make selector more specific to override general .sidebar h2 styles */
+[data-module="menu"] .menu-section-title {
     font-size: 1.8rem; /* Slightly smaller than the main h2 */
     color: #FFC72C; /* Orono Gold */
-    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.2); /* Use a dark border for the white background */
     padding-bottom: 0.3em;
     margin-bottom: 0.5em;
+    text-align: left; /* Override the centered style from .sidebar h2 */
 }
 
-.menu-category h4 {
+/* Category headers (e.g. "Entrees") should also be dark */
+[data-module="menu"] .menu-category h4 {
     font-size: 1.4rem;
-    color: #fff;
+    color: #333; /* Use a dark color for the white background */
     margin-top: 1em;
     margin-bottom: 0.5em;
 }
@@ -134,7 +137,7 @@ html, body {
 
 .menu-category li {
     margin-bottom: 0.5em;
-    font-size: 1.1rem;
+    font-size: 1.3rem;
     line-height: 1.4;
 }
 
@@ -168,7 +171,7 @@ html, body {
 /* --- Module Loading/Error State Styling --- */
 .module-loading, .module-error {
     color: #aaa;
-    text-align: `;
+    text-align: left;
     padding: 2em 0;
     font-style: italic;
 }

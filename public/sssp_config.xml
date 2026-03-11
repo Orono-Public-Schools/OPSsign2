@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget>
+    <ver>1.000</ver>
+    <size>1</size>
+    <widgetname>OPSSign</widgetname>
+    <dcont>y</dcont>
+    <description>Web based digital signage developed by Orono Public Schools IT</description>
+    <width>1920</width>
+    <height>1080</height>
+    <author>
+        <name>OPS IT</name>
+    </author>
+</widget>

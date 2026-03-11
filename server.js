@@ -1,12 +1,14 @@
 const express = require('express');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const cheerio = require('cheerio');
 const session = require('express-session');
 const axios = require('axios');
 const { google } = require('googleapis');
 const path = require('path');
 const ping = require('ping');
 const fs = require('fs');
+const hlsProxyRouter = require('./hls-proxy'); // Import the new HLS proxy
 require('dotenv').config();
 
 const app = express();
@@ -33,7 +35,8 @@ const BUILDING_GROUPS = {
   'HS': 'sign-hs@orono.k12.mn.us',
   'DC': 'sign-dc@orono.k12.mn.us',
   'DO': 'sign-do@orono.k12.mn.us',
-  'AC': 'sign-ac@orono.k12.mn.us'
+  'AC': 'sign-ac@orono.k12.mn.us',
+  'AT': 'sign-at@orono.k12.mn.us'
 };
 
 const BUILDING_NAMES = {
@@ -43,7 +46,8 @@ const BUILDING_NAMES = {
   'HS': 'High School',
   'DC': 'Discovery Center',
   'DO': 'District Office',
-  'AC': 'Activity Center'
+  'AC': 'Activity Center',
+  'AT': 'Athletics/Activites'
 };
 
 const ADMIN_GROUP = 'sign-admin@orono.k12.mn.us';
@@ -617,12 +621,13 @@ async function addDeviceToSheet(deviceData) {
     deviceData.googleCalendarUrl || '', // L
     deviceData.active ? 'TRUE' : 'FALSE', // M: active
     deviceData.presentationDuration || 600, // N (default 10 mins)
-    deviceData.rotationItemDuration || 15 // O (default 15 secs)
+    deviceData.rotationItemDuration || 15, // O (default 15 secs)
+    deviceData.streamUrl || ''          // P: streamUrl
   ];
 
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${nextRow}:O${nextRow}`,
+    range: `${sheetName}!A${nextRow}:P${nextRow}`,
     valueInputOption: 'RAW',
     resource: {
       values: [
@@ -682,18 +687,16 @@ async function updateDeviceInSheet(deviceId, deviceData) {
     deviceData.googleCalendarUrl || '', // L
     deviceData.active ? 'TRUE' : 'FALSE', // M: active
     deviceData.presentationDuration || 600, // N
-    deviceData.rotationItemDuration || 15 // O
+    deviceData.rotationItemDuration || 15, // O
+    deviceData.streamUrl || ''          // P
   ];
 
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${targetRow}:O${targetRow}`,
+    range: `${sheetName}!A${targetRow}:P${targetRow}`,
     valueInputOption: 'RAW',
     resource: {
-      values: [rowData],
-      values: [
-        rowData
-      ]
+      values: [rowData]
     }
   };
 
@@ -1129,7 +1132,7 @@ async function getUserBuildingPermissions(userEmail) {
       // User is district admin - has access to all buildings
       const permissions = {
         level: 'district',
-        buildings: ['SE', 'IS', 'MS', 'HS', 'DC', 'DO', 'AC'],
+        buildings: ['SE', 'IS', 'MS', 'HS', 'DC', 'DO', 'AC', 'AT'],
         isAdmin: true
       };
       
@@ -1793,6 +1796,11 @@ app.post('/api/admin/alerts', requireAuthWithPermissions, async (req, res) => {
           return res.status(400).json({ error: 'Missing required fields', message: 'A Standard Response Protocol action is required.' });
         }
         break;
+      case 'big-game':
+        if (!newAlert.hudlUrl) {
+          return res.status(400).json({ error: 'Missing required fields', message: 'Hudl Game URL is required for a Big Game alert.' });
+        }
+        break;
       default:
         return res.status(400).json({ error: 'Invalid alert type', message: `Unknown alert type: ${newAlert.type}` });
     }
@@ -1875,6 +1883,9 @@ app.put('/api/admin/alerts/:alertId', requireAuthWithPermissions, async (req, re
           break;
         case 'srp':
           if (!updates.srpAction) return res.status(400).json({ error: 'Missing required fields', message: 'SRP Action is required.' });
+          break;
+        case 'big-game':
+          if (!updates.hudlUrl) return res.status(400).json({ error: 'Missing required fields', message: 'Hudl Game URL is required.' });
           break;
       }
     }
@@ -2401,6 +2412,55 @@ app.get('/test-auth', (req, res) => {
     res.send(`<h1>You are NOT logged in</h1><a href="/auth/google">Login with Google</a>`);
   }
 });
+
+// --- NEW: Intelligent HLS Stream Proxy with Playlist Rewriting ---
+app.get('/api/stream-proxy', async (req, res) => {
+    const targetUrl = req.query.url;
+
+    if (!targetUrl) {
+        return res.status(400).send('Proxy Error: Missing "url" query parameter.');
+    }
+    console.log(`[PROXY] Request for: ${targetUrl}`);
+
+    try {
+        const response = await axios({
+            method: 'get',
+            url: targetUrl,
+            // Fetch playlists as text, but stream video segments
+            responseType: targetUrl.endsWith('.m3u8') ? 'text' : 'stream'
+        });
+
+        // If it's a playlist, we need to rewrite the URLs inside it.
+        if (targetUrl.endsWith('.m3u8')) {
+            const baseUrl = new URL(targetUrl);
+            const rewrittenPlaylist = response.data.split('\n').map(line => {
+                // If a line is not a comment and not empty, it's a URL to a segment or another playlist.
+                if (line && !line.startsWith('#')) {
+                    // Construct the full URL for the segment.
+                    const segmentUrl = new URL(line, baseUrl).href;
+                    // Return the proxied URL for the segment.
+                    return `/api/stream-proxy?url=${encodeURIComponent(segmentUrl)}`;
+                }
+                return line;
+            }).join('\n');
+
+            res.set('Content-Type', 'application/vnd.apple.mpegurl');
+            res.send(rewrittenPlaylist);
+        } else {
+            // For all other files (like .ts video segments), just pipe them directly.
+            // --- FIX: Pass through the original Content-Type header ---
+            // This tells the browser it's receiving a video segment.
+            res.set('Content-Type', response.headers['content-type']);
+            response.data.pipe(res);
+        }
+    } catch (error) {
+        console.error(`[PROXY] Error for ${targetUrl}:`, error.message);
+        res.status(502).send(`Proxy Error: Failed to fetch the requested resource.`);
+    }
+});
+
+// --- NEW: Use the robust FFmpeg HLS Proxy ---
+app.use('/api/hls-proxy', hlsProxyRouter);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

@@ -99,4 +99,15 @@
     color: var(--text-light);
   }
   
-  
+  .btn-edit {
+    background-color: var(--orono-gold);
+  }
+
+  .btn-refresh {
+    background-color: var(--success-color);
+    color: var(--text-light);
+  }
+
+  .btn-danger {
+    background-color: var(--orono-brand-red);
+  }

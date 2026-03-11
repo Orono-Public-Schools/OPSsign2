@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hudl Livestream</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="{THEME_PATH}">
+    <style>
+        /* Ensure the container fills the screen with a black background */
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #000; }
+        #slideContainer { width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+    <!-- The main script will populate this container with the Hudl iframe -->
+    <div id="slideContainer">
+        <div class="loading">Loading Hudl Stream...</div>
+    </div>
+</body>
+</html>

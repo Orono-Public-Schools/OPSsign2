@@ -127,10 +127,6 @@
                             await this.loadTemplate(this.config.template);
                         }
 
-                        // --- NEW: Signal to the template that the config is ready ---
-                        // This allows template scripts to initialize safely.
-                        window.dispatchEvent(new CustomEvent('templateReady'));
-
                         // --- NEW: Initialize modules after template is loaded ---
                         await this.initializeModules(); 
                         
@@ -141,15 +137,13 @@
                         // For other templates, initialize the slide if an ID is provided.
                         if (this.config.template === 'rotation') {
                             console.log('Rotation template loaded. Its internal script will manage content.');
+                            // The rotation template's script is now in control. It will use the
+                            // placeholders to construct its own content, including the slideshow.
                         } else if (this.config.slideId) {
                             // For standard, sidebar, etc., templates, we initialize the slide with looping ON.
                             // These templates are expected to provide a #slideContainer element.
                             console.log(`Initializing presentation for slideId: ${this.config.slideId} in template: ${this.config.template}`);
                             this.initializeSlide(this.config.slideId, 'slideContainer', true);
-                        } else if (['live-tv', 'hudl', 'athletics-schedule'].includes(this.config.template)) {
-                            // These templates manage their own content (e.g., video streams) and do not require a slideId.
-                            // The template's internal script is now in control.
-                            console.log(`Template "${this.config.template}" is self-managing. No slideId needed.`);
                         } else {
                             console.log('No slideId configured. The template will display its default content.');
                             // For the standard template, not having a slideId is an error.
@@ -386,11 +380,6 @@
                     case 'refresh':
                         console.log('🔄 Server requested configuration refresh');
                         this.handleRefreshCommand(data);
-                        break;
-
-                    case 'hard_refresh':
-                        console.log('🔄 HARD REFRESH requested by server. Reloading page...');
-                        window.location.reload(true); // true = force reload from server
                         break;
                         
                     case 'alert':
@@ -649,9 +638,6 @@
             async loadTemplate(templateName) {
                 try {
                     // Fetch the template HTML content.
-                    // --- FIX: Make the full, current config available to the template script ---
-                    window.deviceConfig = this.config;
-
                     const response = await fetch(`/templates/${templateName}/index.html.template`);
 
                     if (response.ok) {
@@ -707,50 +693,44 @@
                         const parser = new DOMParser();
                         const templateDoc = parser.parseFromString(templateText, 'text/html');
 
+                        // Grab the currently running script so we can preserve it.
+                        const mainScript = document.querySelector('body > script:last-of-type');
+
                         // Clear the current body.
                         document.body.innerHTML = '';
 
-                        // --- FIX: Asynchronously load head scripts and wait for them to finish ---
-                        const headPromises = [];
+                        // Process and append styles from the template's <head>.
+                        // This ensures that styles defined within the template are applied.
+                        // It also correctly handles the new stylesheet path.
                         Array.from(templateDoc.head.childNodes).forEach(node => {
+                            // We only want to append <style> tags or <link> tags that are stylesheets.
                             const isStylesheetLink = node.nodeName.toLowerCase() === 'link' && node.rel === 'stylesheet';
                             const isStyleTag = node.nodeName.toLowerCase() === 'style';
-                            const isScriptTag = node.nodeName.toLowerCase() === 'script' && node.src;
 
                             if (isStylesheetLink || isStyleTag) {
-                                document.head.appendChild(node.cloneNode(true));
-                            } else if (isScriptTag) {
-                                // Create a promise that resolves when the script loads.
-                                const scriptPromise = new Promise((resolve, reject) => {
-                                    const newScript = document.createElement('script');
-                                    newScript.src = node.src;
-                                    newScript.onload = resolve;
-                                    newScript.onerror = reject;
-                                    document.head.appendChild(newScript);
-                                });
-                                headPromises.push(scriptPromise);
+                                document.head.appendChild(node.cloneNode(true)); // Use cloneNode to append
                             }
                         });
 
-                        // Wait for all head scripts (like hls.js) to load before proceeding.
-                        await Promise.all(headPromises);
+                        // --- FIX: Correctly process and execute scripts from the loaded template ---
+                        // Iterate over all nodes in the template's body.
+                        const templateBodyNodes = Array.from(templateDoc.body.childNodes);
 
-                        // Now that external scripts are loaded, process the body.
-                        Array.from(templateDoc.body.childNodes).forEach(node => {
+                        templateBodyNodes.forEach(node => {
+                            // If the node is a script, it won't execute if just cloned.
+                            // We must create a new script element and copy the content.
                             if (node.nodeName.toLowerCase() === 'script') {
-                                // For inline scripts, create a new element to execute them.
                                 const newScript = document.createElement('script');
                                 newScript.textContent = node.textContent;
-                                document.body.appendChild(newScript);
+                                document.body.appendChild(newScript); // Appending forces execution.
                             } else {
-                                // For other elements, just clone and append.
+                                // For all other nodes, just clone and append them.
                                 document.body.appendChild(node.cloneNode(true));
                             }
                         });
 
-                        // Re-append the main DigitalSignage script to ensure it continues to run.
-                        const mainScript = document.querySelector('script[src="index.html"]');
-                        if (mainScript) document.body.appendChild(mainScript.cloneNode(true));
+                        // Re-append the main script to the new body.
+                        if (mainScript) document.body.appendChild(mainScript);
 
                         console.log(`Template "${templateName}" loaded successfully`);
                     } else {
