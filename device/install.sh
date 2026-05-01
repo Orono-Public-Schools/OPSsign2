@@ -68,7 +68,8 @@ sudo apt install -y \
     xinit \
     xserver-xorg-legacy \
     curl \
-    wget
+    wget \
+    plymouth
 
 echo "✅ Packages installed successfully"
 
@@ -202,6 +203,24 @@ fi
 # Disable overscan if not already done
 if ! grep -q "disable_overscan" /boot/config.txt; then
     echo "disable_overscan=1" | sudo tee -a /boot/config.txt
+fi
+
+# Configure Plymouth boot splash
+echo "🖼️ Configuring boot splash screen..."
+if [ -f "$DEVICE_DIR/splash.png" ]; then
+    sudo cp /usr/share/plymouth/themes/pix/splash.png \
+            /usr/share/plymouth/themes/pix/splash.png.bak 2>/dev/null || true
+    sudo cp "$DEVICE_DIR/splash.png" /usr/share/plymouth/themes/pix/splash.png
+    sudo tee /etc/plymouth/plymouthd.conf > /dev/null <<EOF
+# Administrator customizations go in this file
+[Daemon]
+Theme=pix
+EOF
+    echo "🔄 Updating initramfs (this may take a minute)..."
+    sudo update-initramfs -u
+    echo "✅ Boot splash configured"
+else
+    echo "⚠️  splash.png not found in device directory - skipping boot splash setup"
 fi
 
 echo ""
