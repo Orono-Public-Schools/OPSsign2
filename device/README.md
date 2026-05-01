@@ -9,3 +9,13 @@
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Orono-Public-Schools/OPSsign2/main/device/install.sh | bash
+```
+
+### Setup Splash Screen on existing Raspberry Pi
+
+1. SSH into device
+2. Run the setup-splash command:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Orono-Public-Schools/OPSsign2/main/device/setup-splash.sh | bash
+```
