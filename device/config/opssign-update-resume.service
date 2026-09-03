@@ -1,0 +1,17 @@
+[Unit]
+Description=OPSsign2 deferred device update (runs after overlay is disabled)
+After=network-online.target
+Wants=network-online.target
+Before=getty@tty1.service
+ConditionPathExists=/opt/opssign/.update-pending
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+TimeoutStartSec=3600
+StandardOutput=journal+console
+StandardError=journal+console
+ExecStart=/opt/opssign/scripts/update-device.sh --resume
+
+[Install]
+WantedBy=multi-user.target

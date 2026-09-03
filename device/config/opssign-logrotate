@@ -1,0 +1,23 @@
+/var/log/opssign-kiosk.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    # copytruncate, not create: chromium-kiosk.sh holds this file open for the
+    # entire life of the session. Renaming it out from under an open fd means
+    # Chromium keeps writing to the rotated file forever and the live log stays
+    # empty. Copying then truncating in place keeps the fd valid.
+    copytruncate
+    su opssign opssign
+}
+
+/opt/opssign/logs/update-*.log {
+    weekly
+    rotate 8
+    compress
+    missingok
+    notifempty
+    create 644 root root
+}
