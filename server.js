@@ -1,3 +1,5 @@
+require('dotenv').config({ path: __dirname + '/.env' });
+
 const express = require('express');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
@@ -9,7 +11,7 @@ const path = require('path');
 const ping = require('ping');
 const fs = require('fs');
 const hlsProxyRouter = require('./hls-proxy'); // Import the new HLS proxy
-require('dotenv').config();
+const ical = require('node-ical');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -48,6 +50,23 @@ const BUILDING_NAMES = {
   'DO': 'District Office',
   'AC': 'Activity Center',
   'AT': 'Athletics/Activites'
+};
+
+// Athletic schedule configuration
+const ICAL_FEED_URL = 'https://www2.arbitersports.com/ICal/School/schedule.ics?id=O4L9A8VUjJaJ63dVuusK5Q%3d%3d';
+const SCHEDULE_CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
+
+const BOUND_ICAL_FEED_URL = 'https://gobound.com/mn/schools/orono/calendar/ical/f8d16296c226400';
+
+let boundScheduleCache = {
+    data: null,
+    timestamp: null
+};
+
+// Schedule cache
+let scheduleCache = {
+    data: null,
+    timestamp: null
 };
 
 const ADMIN_GROUP = 'sign-admin@orono.k12.mn.us';
@@ -206,6 +225,172 @@ function canAccessBuilding(userPermissions, building) {
   return userPermissions.buildings.includes(building);
 }
 
+
+// Fetch and parse athletic schedule from Arbiter iCal feed
+async function fetchSchedule() {
+    try {
+        console.log('📅 Fetching schedule from Arbiter iCal feed...');
+        const events = await ical.async.fromURL(ICAL_FEED_URL);
+
+        const schedule = Object.values(events)
+            .filter(event => event.type === 'VEVENT')
+            .map(event => {
+                const startDate = new Date(event.start);
+                const endDate = new Date(event.end);
+
+                return {
+                    id: event.uid,
+                    title: event.summary || 'Untitled Event',
+                    start: event.start,
+                    end: event.end,
+                    startISO: startDate.toISOString(),
+                    endISO: endDate.toISOString(),
+                    location: event.location || '',
+                    description: event.description || '',
+                    isAllDay: !event.start.getHours && !event.start.getMinutes,
+                    dateDisplay: startDate.toLocaleDateString('en-US', {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                    }),
+                    timeDisplay: event.start.getHours ? startDate.toLocaleTimeString('en-US', {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        hour12: true
+                    }) : 'All Day'
+                };
+            })
+            .sort((a, b) => new Date(a.start) - new Date(b.start));
+
+        console.log(`✅ Successfully fetched ${schedule.length} events from schedule`);
+        return schedule;
+
+    } catch (error) {
+        console.error('❌ Error fetching schedule:', error);
+        throw error;
+    }
+}
+
+async function fetchBoundSchedule() {
+    try {
+        console.log('📅 Fetching schedule from Bound iCal feed...');
+        const events = await ical.async.fromURL(BOUND_ICAL_FEED_URL);
+
+        const schedule = Object.values(events)
+            .filter(event => {
+                if (event.type !== 'VEVENT') return false;
+                // Filter out cancelled events
+                if (event.status === 'CANCELLED') return false;
+                return true;
+            })
+
+            .map(event => {
+                const summary = typeof event.summary === 'object'
+                    ? event.summary.val
+                    : (event.summary || '');
+
+                // Parse sport, gender, and level from SUMMARY
+                // Format: "Girls Golf: Burl Oaks Invitational (Varsity)"
+                //         "Baseball: Orono vs Delano (Varsity)"
+                const sportLevelMatch = summary.match(/^(.+?):\s*.+\(([^)]+)\)\s*$/);
+                const rawSport = sportLevelMatch ? sportLevelMatch[1].trim() : summary;
+                const level    = sportLevelMatch ? sportLevelMatch[2].trim() : '';
+
+                const IMPLICIT_GENDER = {
+                    'softball':   'Girls',
+                    'wrestling':  'Boys',
+                    'football':   'Boys',
+                    'baseball':   'Boys',
+                    'gymnastics': 'Girls',
+                };
+
+                let gender = '';
+                let sport  = rawSport;
+                if (/^girls\s+/i.test(rawSport)) {
+                    gender = 'Girls';
+                    sport  = rawSport.replace(/^girls\s+/i, '').trim();
+                } else if (/^boys\s+/i.test(rawSport)) {
+                    gender = 'Boys';
+                    sport  = rawSport.replace(/^boys\s+/i, '').trim();
+                }
+
+                const location = (event.location || '').trim() || 'Location TBD';
+
+                // Home/away and opponent — unchanged
+                let opponent       = '';
+                let homeAway       = 'home';
+                let isInvitational = false;
+
+                const matchupMatch = summary.match(/^[^:]+:\s*(.+?)\s*\([^)]*\)\s*$/);
+                const matchup = matchupMatch ? matchupMatch[1].trim() : '';
+
+                const vsMatch = matchup.match(/^(.+?)\s+vs\s+(.+)$/i);
+                if (vsMatch) {
+                    const left  = vsMatch[1].trim();
+                    const right = vsMatch[2].trim();
+                    if (/orono/i.test(left)) {
+                        homeAway = 'away';
+                        opponent = right;
+                    } else {
+                        homeAway = 'home';
+                        opponent = left;
+                    }
+                } else if (matchup) {
+                    isInvitational = true;
+                    opponent = matchup;
+                    // For invitationals/meets, infer home/away from location
+                    if (/orono/i.test(location)) {
+                        homeAway = 'home';
+                    } else {
+                        homeAway = 'away';
+                    }
+                }
+
+                // Fix: node-ical doesn't expose event.dtstart as a key —
+                // use the dateOnly property on event.start instead
+                const isAllDay  = event.start.dateOnly === true;
+                const startDate = new Date(event.start);
+
+                return {
+                    id:            event.uid,
+                    sport:         sport,
+                    level:         level,
+                    gender:        gender,
+                    opponent:      opponent,
+                    homeAway:      homeAway,
+                    isInvitational: isInvitational,
+                    location:      location,
+                    start:         event.start,
+                    startISO:      startDate.toISOString(),
+                    isAllDay:      isAllDay,
+                    dateDisplay:   startDate.toLocaleDateString('en-US', {
+                                      timeZone: 'America/Chicago',
+                                      weekday:  'short',
+                                      month:    'short',
+                                      day:      'numeric',
+                                      year:     'numeric'
+                                  }),
+                    timeDisplay:   isAllDay ? 'All Day' : startDate.toLocaleTimeString('en-US', {
+                                      timeZone: 'America/Chicago',
+                                      hour:     'numeric',
+                                      minute:   '2-digit',
+                                      hour12:   true
+               })
+                };
+            })
+            .sort((a, b) => new Date(a.start) - new Date(b.start));
+
+        console.log(`✅ Successfully fetched ${schedule.length} events from Bound`);
+        return schedule;
+
+    } catch (error) {
+        console.error('❌ Error fetching Bound schedule:', error);
+        throw error;
+    }
+}
+
+
 // Clear group membership cache periodically (every hour)
 setInterval(() => {
   const now = Date.now();
@@ -259,6 +444,177 @@ app.get('/auth/logout', (req, res) => {
     // Always redirect to homepage after logout
     res.redirect('/');
   });
+});
+
+
+// ============================================================================
+// ATHLETIC SCHEDULE API ENDPOINTS
+// ============================================================================
+
+// Get all schedule events (with caching)
+app.get('/api/schedule', async (req, res) => {
+    try {
+        const now = Date.now();
+
+        // Check if cache is still valid
+        if (scheduleCache.data && scheduleCache.timestamp &&
+            (now - scheduleCache.timestamp < SCHEDULE_CACHE_DURATION)) {
+            console.log('📅 Serving schedule from cache');
+            return res.json({
+                success: true,
+                cached: true,
+                cacheAge: Math.round((now - scheduleCache.timestamp) / 1000 / 60),
+                events: scheduleCache.data
+            });
+        }
+
+        // Cache is stale or doesn't exist, fetch fresh data
+        const schedule = await fetchSchedule();
+
+        // Update cache
+        scheduleCache = {
+            data: schedule,
+            timestamp: now
+        };
+
+        res.json({
+            success: true,
+            cached: false,
+            events: schedule
+        });
+
+    } catch (error) {
+        console.error('❌ Schedule API error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch schedule',
+            message: error.message
+        });
+    }
+});
+
+// Get only upcoming events
+app.get('/api/schedule/upcoming', async (req, res) => {
+    try {
+        const now = Date.now();
+
+        // Get schedule (from cache or fresh)
+        if (!scheduleCache.data || !scheduleCache.timestamp ||
+            (now - scheduleCache.timestamp >= SCHEDULE_CACHE_DURATION)) {
+            scheduleCache = {
+                data: await fetchSchedule(),
+                timestamp: now
+            };
+        }
+
+        // Filter to only upcoming events
+        const upcoming = scheduleCache.data.filter(event =>
+            new Date(event.start) >= new Date()
+        );
+
+        // Optional: limit to next N events
+        const limit = parseInt(req.query.limit) || upcoming.length;
+
+        res.json({
+            success: true,
+            events: upcoming.slice(0, limit)
+        });
+
+    } catch (error) {
+        console.error('❌ Upcoming schedule API error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch upcoming schedule',
+            message: error.message
+        });
+    }
+});
+
+// Manual refresh endpoint (for testing)
+app.post('/api/schedule/refresh', async (req, res) => {
+    try {
+        console.log('🔄 Manual schedule refresh requested');
+        const schedule = await fetchSchedule();
+
+        scheduleCache = {
+            data: schedule,
+            timestamp: Date.now()
+        };
+
+        res.json({
+            success: true,
+            message: 'Schedule cache refreshed',
+            eventCount: schedule.length
+        });
+
+    } catch (error) {
+        console.error('❌ Schedule refresh error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to refresh schedule',
+            message: error.message
+        });
+    }
+});
+
+// ============================================================================
+// BOUND ATHLETIC SCHEDULE API ENDPOINTS
+// ============================================================================
+
+app.get('/api/schedule/bound', async (req, res) => {
+    try {
+        const now = Date.now();
+        if (boundScheduleCache.data && boundScheduleCache.timestamp &&
+            (now - boundScheduleCache.timestamp < SCHEDULE_CACHE_DURATION)) {
+            console.log('📅 Serving Bound schedule from cache');
+            return res.json({
+                success: true,
+                cached: true,
+                cacheAge: Math.round((now - boundScheduleCache.timestamp) / 1000 / 60),
+                events: boundScheduleCache.data
+            });
+        }
+        const schedule = await fetchBoundSchedule();
+        boundScheduleCache = { data: schedule, timestamp: now };
+        res.json({ success: true, cached: false, events: schedule });
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Failed to fetch Bound schedule', message: error.message });
+    }
+});
+
+app.get('/api/schedule/bound/upcoming', async (req, res) => {
+    try {
+        const now = Date.now();
+        if (!boundScheduleCache.data || !boundScheduleCache.timestamp ||
+            (now - boundScheduleCache.timestamp >= SCHEDULE_CACHE_DURATION)) {
+            boundScheduleCache = { data: await fetchBoundSchedule(), timestamp: now };
+        }
+
+        const today = new Date();
+        const days = parseInt(req.query.days) || 30;
+        const cutoff = new Date();
+        cutoff.setDate(today.getDate() + days);
+
+        const upcoming = boundScheduleCache.data.filter(event => {
+            const eventDate = new Date(event.start);
+            return eventDate >= today && eventDate <= cutoff;
+        });
+
+        res.json({ success: true, events: upcoming });
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Failed to fetch upcoming Bound schedule', message: error.message });
+    }
+});
+
+app.post('/api/schedule/bound/refresh', async (req, res) => {
+    try {
+        console.log('🔄 Manual Bound schedule refresh requested');
+        const schedule = await fetchBoundSchedule();
+        boundScheduleCache = { data: schedule, timestamp: Date.now() };
+        res.json({ success: true, message: 'Bound schedule cache refreshed', eventCount: schedule.length });
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Failed to refresh Bound schedule', message: error.message });
+    }
 });
 
 // ==================== SSE IMPLEMENTATION ====================
@@ -540,7 +896,8 @@ async function initializeGoogleApis() {
       console.log('🔄 Attempting to initialize Google APIs with service account...');
       // Initialize service account - simplified approach
       try {
-        const serviceAccountPath = './service-account-key.json';
+        //const serviceAccountPath = './service-account-key.json';
+        const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
         auth = new google.auth.GoogleAuth({
           keyFile: serviceAccountPath,
           scopes: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/presentations.readonly'],
@@ -622,12 +979,15 @@ async function addDeviceToSheet(deviceData) {
     deviceData.active ? 'TRUE' : 'FALSE', // M: active
     deviceData.presentationDuration || 600, // N (default 10 mins)
     deviceData.rotationItemDuration || 15, // O (default 15 secs)
-    deviceData.streamUrl || ''          // P: streamUrl
+    deviceData.streamUrl || '',          // P: streamUrl
+    deviceData.slideshow || '',          // Q: slideshow
+    deviceData.scrollSpeed || 1.0,        // R: scrollSpeed
+    deviceData.autoScroll !== false  // S: autoScroll (defaults to true)
   ];
 
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${nextRow}:P${nextRow}`,
+    range: `${sheetName}!A${nextRow}:S${nextRow}`,
     valueInputOption: 'RAW',
     resource: {
       values: [
@@ -673,27 +1033,29 @@ async function updateDeviceInSheet(deviceId, deviceData) {
   // Prepare the updated row data - UPDATED to include building
   // IMPORTANT: This assumes a fixed column order in your Google Sheet.
   const rowData = [
-    deviceData.deviceId,              // A: deviceId
-    deviceData.ipAddress || '',       // B: ipAddress
-    deviceData.location || '',        // C: location
-    deviceData.template || 'standard', // D: template
-    deviceData.theme || 'default',    // E: theme
-    deviceData.slideId || '',         // F: slideId
-    deviceData.refreshInterval || 15, // G: refreshInterval
-    deviceData.coordinates || '',     // H: coordinates
-    deviceData.notes || '',           // I: notes
-    deviceData.building || '',        // J: building
-    deviceData.name || '',             // K: displayname
-    deviceData.googleCalendarUrl || '', // L
-    deviceData.active ? 'TRUE' : 'FALSE', // M: active
-    deviceData.presentationDuration || 600, // N
-    deviceData.rotationItemDuration || 15, // O
-    deviceData.streamUrl || ''          // P
+      deviceData.deviceId,              // A: deviceId
+      deviceData.ipAddress || '',       // B: ipAddress
+      deviceData.location || '',        // C: location
+      deviceData.template || 'standard', // D: template
+      deviceData.theme || 'default',    // E: theme
+      deviceData.slideId || '',         // F: slideId
+      deviceData.refreshInterval || 15, // G: refreshInterval
+      deviceData.coordinates || '',     // H: coordinates
+      deviceData.notes || '',           // I: notes
+      deviceData.building || '',        // J: building
+      deviceData.name || '',             // K: displayname
+      deviceData.googleCalendarUrl || '', // L
+      deviceData.active ? 'TRUE' : 'FALSE', // M: active
+      deviceData.presentationDuration || 600, // N (default 10 mins)
+      deviceData.rotationItemDuration || 15, // O (default 15 secs)
+      deviceData.streamUrl || '',          // P: streamUrl
+      deviceData.slideshow || '',          // Q: slideshow
+      deviceData.scrollSpeed || 1.0,        // R: scrollSpeed
+      deviceData.autoScroll !== false  // S: autoScroll (defaults to true)
   ];
-
   const request = {
     spreadsheetId: sheetId,
-    range: `${sheetName}!A${targetRow}:P${targetRow}`,
+    range: `${sheetName}!A${targetRow}:S${targetRow}`,
     valueInputOption: 'RAW',
     resource: {
       values: [rowData]
@@ -1103,7 +1465,8 @@ async function getUserBuildingPermissions(userEmail) {
   
   // Use JWT authentication directly
   const { JWT } = require('google-auth-library');
-  const serviceAccount = require('./service-account-key.json');
+  //const serviceAccount = require('./service-account-key.json');
+  const serviceAccount = require(process.env.GOOGLE_APPLICATION_CREDENTIALS);
 
   const jwtClient = new JWT({
     email: serviceAccount.client_email,
@@ -1719,8 +2082,8 @@ app.get('/api/admin/service-info', requireAuthWithPermissions, (req, res) => {
 
   try {
     // Read the email directly from the service account JSON file.
-    // This is more reliable than environment variables which might not be set correctly.
-    const serviceAccountPath = path.join(__dirname, 'service-account-key.json');
+    //const serviceAccountPath = path.join(__dirname, 'service-account-key.json');
+    const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     if (fs.existsSync(serviceAccountPath)) {
       const serviceAccount = require(serviceAccountPath); // require() caches the file read
       const serviceAccountEmail = serviceAccount.client_email;

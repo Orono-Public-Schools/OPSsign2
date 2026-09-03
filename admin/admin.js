@@ -376,7 +376,10 @@ class AdminInterface {
             details.appendChild(createInfo('ID', device.deviceId));
             details.appendChild(createInfo('Location', device.location || 'Not specified'));
             details.appendChild(createInfo('Template', device.template, `template-${device.template}`));
-            details.appendChild(createInfo('Slides', device.slideId ? '✅ Configured' : '⚪ None'));
+            const slideStatus = !device.slideId ? '⚪ None'
+                : device.slideId.startsWith('2PACX-') ? '✅ Published'
+                : '⚠️ Not published';
+            details.appendChild(createInfo('Slides', slideStatus));
 
             devicesGrid.appendChild(card);
         });
@@ -636,28 +639,23 @@ class AdminInterface {
 
     extractSlideIdFromUrl(url) {
         if (!url || typeof url !== 'string') return null;
-        
+
         const trimmedUrl = url.trim();
         if (!trimmedUrl) return null;
-        
-        const patterns = [
-            /\/presentation\/d\/([a-zA-Z0-9-_]+)/,
-            /\/presentation\/d\/([a-zA-Z0-9-_]+)\/edit/,
-            /\/presentation\/d\/([a-zA-Z0-9-_]+)\/preview/,
-            /\/presentation\/d\/([a-zA-Z0-9-_]+)\/embed/
-        ];
-        
-        for (const pattern of patterns) {
-            const match = trimmedUrl.match(pattern);
-            if (match && match[1]) {
-                return match[1];
-            }
-        }
-        
-        if (/^[a-zA-Z0-9-_]{40,}$/.test(trimmedUrl)) {
-            return trimmedUrl;
-        }
-        
+
+        // Published-to-web form MUST be tested first — the file-ID pattern below
+        // matches "/presentation/d/e/..." and captures just "e".
+        const published = trimmedUrl.match(/\/presentation\/d\/e\/(2PACX-[a-zA-Z0-9-_]+)/);
+        if (published) return { id: published[1], kind: 'published' };
+
+        // {20,} so this can never match the bare "e" segment
+        const file = trimmedUrl.match(/\/presentation\/d\/([a-zA-Z0-9-_]{20,})/);
+        if (file) return { id: file[1], kind: 'file' };
+
+        // Bare IDs pasted directly
+        if (/^2PACX-[a-zA-Z0-9-_]+$/.test(trimmedUrl)) return { id: trimmedUrl, kind: 'published' };
+        if (/^[a-zA-Z0-9-_]{40,}$/.test(trimmedUrl))   return { id: trimmedUrl, kind: 'file' };
+
         return null;
     }
 
@@ -666,17 +664,20 @@ class AdminInterface {
         const slideIdInput = document.getElementById('slideId');
         const validation = document.getElementById('urlValidation');
         const url = urlInput.value.trim();
-        
+
         if (!url) {
             validation.style.display = 'none';
             return;
         }
 
-        const extractedId = this.extractSlideIdFromUrl(url);
-        
-        if (extractedId) {
-            slideIdInput.value = extractedId;
-            validation.innerHTML = `<div class="validation-success">✅ ID extracted successfully.</div>`;
+        const result = this.extractSlideIdFromUrl(url);
+
+        if (result && result.kind === 'published') {
+            slideIdInput.value = result.id;
+            validation.innerHTML = `<div class="validation-success">✅ Published ID extracted successfully.</div>`;
+        } else if (result && result.kind === 'file') {
+            // Deliberately do NOT populate slideId — displays are signed out and can't open this.
+            validation.innerHTML = `<div class="validation-error">❌ That's an edit/share link. Displays run signed-out and will hit Google's login screen.<br>In Slides: <strong>File → Share → Publish to web → Link</strong>, then paste that URL (it contains <code>/d/e/</code>).</div>`;
         } else {
             validation.innerHTML = `<div class="validation-error">❌ Could not extract a valid ID from the URL.</div>`;
         }
@@ -734,6 +735,11 @@ class AdminInterface {
         document.getElementById('presentationLink').value = device.presentationLink || '';
         document.getElementById('slideId').value = device.slideId || '';
         document.getElementById('streamUrl').value = device.streamUrl || '';
+        document.getElementById('presentationDuration').value = device.presentationDuration || 180;
+        document.getElementById('scrollSpeed').value = device.scrollSpeed || 1.0;
+        // Update the display value for scrollSpeed
+        document.getElementById('scrollSpeedValue').textContent = (device.scrollSpeed || 1.0) + 'x';
+        document.getElementById('autoScroll').checked = device.autoScroll !== false;
         document.getElementById('active').checked = device.active;
 
         // Set initial state for template fields
@@ -1042,11 +1048,19 @@ document.addEventListener('DOMContentLoaded', function() {
             presentationLink: formData.get('presentationLink'),
             slideId: formData.get('slideId'),
             active: formData.has('active'),
-            // General module fields
             googleCalendarUrl: formData.get('googleCalendarUrl'),
-            streamUrl: formData.get('streamUrl')
+            streamUrl: formData.get('streamUrl'),
+            presentationDuration: formData.get('presentationDuration'),
+            scrollSpeed: formData.get('scrollSpeed'),
+            autoScroll: formData.has('autoScroll')
         };
         
+        const link = formData.get('presentationLink');
+        if (link && link.trim() && !/\/presentation\/d\/e\/2PACX-/.test(link)) {
+            alert('The Google Slides link must be a "Publish to web" link (contains /d/e/). Edit and share links will not load on the displays.');
+            return;
+        }
+
         adminInterface.saveDevice(data);
     });
     

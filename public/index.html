@@ -702,7 +702,9 @@
                             .replace(/{PRESENTATION_DURATION}/g, presentationDurationMs.toString())
                             .replace(/{ROTATION_ITEM_DURATION}/g, itemDurationMs.toString())
                             .replace(/{GOOGLE_CALENDAR_URL}/g, this.config.googleCalendarUrl || '')
-                            .replace(/{BUILDING_CODE}/g, this.config.building || '');
+                            .replace(/{BUILDING_CODE}/g, this.config.building || '')
+                            .replace(/{SCROLL_SPEED}/g, (this.config.scrollSpeed || 1.0).toString())
+                            .replace(/{AUTO_SCROLL}/g, this.config.autoScroll !== false ? 'true' : 'false');
 
                         const parser = new DOMParser();
                         const templateDoc = parser.parseFromString(templateText, 'text/html');
@@ -792,6 +794,16 @@
                 document.head.appendChild(link);
             }
 
+            buildSlidesEmbedUrl(slideId, loop = true) {
+                const loopParam = loop ? 'true' : 'false';
+                const qs = `start=true&loop=${loopParam}&delayms=10000&rm=minimal`;
+                // Published-to-web IDs are session-free; legacy file IDs are ACL-checked
+                // and will dead-end at Google's login interstitial on signed-out displays.
+                return slideId.startsWith('2PACX-')
+                    ? `https://docs.google.com/presentation/d/e/${slideId}/embed?${qs}`
+                    : `https://docs.google.com/presentation/d/${slideId}/embed?${qs}`;
+            }
+
             initializeSlide(slideId, containerId = 'slideContainer', loop = true) {
                 const slideContainer = document.getElementById(containerId);
                 if (slideContainer && !slideContainer.querySelector('iframe')) { // Only initialize if the container exists and is empty.
@@ -830,9 +842,11 @@
                     } 
                     // Case 3: It's a Google Slide ID.
                     else if (slideId) {
-                        const loopParam = loop ? 'true' : 'false';
-                        iframeSrc = `https://docs.google.com/presentation/d/${slideId}/embed?start=true&loop=${loopParam}&delayms=10000&rm=minimal`;
-                        logMessage = `Google Slide initialized in #${containerId} with loop=${loopParam}: ${slideId}`;
+                        iframeSrc = this.buildSlidesEmbedUrl(slideId, loop);
+                        if (!slideId.startsWith('2PACX-')) {
+                            console.warn(`Slide ID "${slideId}" is a file ID, not a published ID. This will fail on signed-out displays — republish the deck via File > Share > Publish to web.`);
+                        }
+                        logMessage = `Google Slide initialized in #${containerId} with loop=${loop}: ${slideId}`;
                     }
 
                     if (iframeSrc) {
@@ -847,9 +861,19 @@
             }
 
             applyDefaultConfiguration() {
-                console.log('Applying default configuration');
-                this.config.slideId = '1E7v2rVGN8TabxalUlXSHE2zEhJxv0tEXiCxE3FD99Ic';
-                this.initializeSlide(this.config.slideId);
+                console.warn('Config unavailable — showing offline notice');
+                const slideContainer = document.getElementById('slideContainer');
+                if (!slideContainer) {
+                    console.error('Slide container not found for offline notice');
+                    return;
+                }
+                slideContainer.innerHTML = `
+                    <div class="offline-notice">
+                        <h2>Display Offline</h2>
+                        <p>Cannot reach the signage server.</p>
+                        <p class="offline-device">${this.config.deviceId}</p>
+                    </div>
+                `;
             }
 
             setupRefresh() {

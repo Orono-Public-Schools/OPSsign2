@@ -176,8 +176,10 @@
                         <option value="sidebar-rotate">Sidebar:R (Slides + Menu/Cal Rotate)</option>
                         <option value="panels">Panels (Slides + Calendar + Menu)</option>
                         <option value="hudl">Hudl Livestream</option>
+                        <option value="schedule-bound">Schedule (Bound)</option>
+			            <option value="schedule-rotation">Schedule (Rotation)</option>
+                        <option value="athletics-wide">Athletics (Wide)</option>
                         <option value="live-tv">Live TV Stream</option>
-                        <option value="athletics-schedule">Athletics Schedule</option>
                     </select>
                 </div>
                 <div class="form-group" id="streamUrl-group" style="display: none;">
@@ -197,7 +199,31 @@
                     <input type="text" id="slideId" name="slideId" 
                            placeholder="Extracted from link above, or enter manually">
                 </div>
-               
+                <div class="form-group">
+                    <label for="presentationDuration">Slideshow Duration (seconds):</label>
+                    <input type="number" id="presentationDuration" name="presentationDuration" min="30" max="600" step="10" placeholder="180">
+                    <small style="display: block; margin-top: 5px; color: #666;">Time for one complete slideshow cycle (default: 180 = 3 minutes)</small>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="autoScroll" name="autoScroll" checked>
+                        Enable Auto-Scroll
+                    </label>
+                    <small style="display: block; margin-top: 5px; color: #666;">Automatically scroll through schedule if content is taller than screen</small>
+                </div>
+                <div class="form-group">
+                    <label for="scrollSpeed">Schedule Scroll Speed:</label>
+                    <input type="range" id="scrollSpeed" name="scrollSpeed" min="0.5" max="2.0" step="0.1" value="1.0">
+                    <span id="scrollSpeedValue">1.0x</span>
+                    <small style="display: block; margin-top: 5px; color: #666;">How fast to scroll through schedule (0.5x = slower, 2.0x = faster)</small>
+                </div>
+
+                <script>
+                // Update scroll speed display
+                document.getElementById('scrollSpeed')?.addEventListener('input', function(e) {
+                    document.getElementById('scrollSpeedValue').textContent = e.target.value + 'x';
+                });
+                </script>
                 <div class="form-group">
                     <label for="googleCalendarUrl">Google Calendar URL (for templates with a calendar module)</label>
                     <input type="url" id="googleCalendarUrl" name="googleCalendarUrl" placeholder="Paste the public calendar embed URL">

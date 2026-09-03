@@ -184,3 +184,23 @@ body.alert-mode #slideContainer {
     margin-bottom: 1rem;
     object-fit: contain; /* Ensures the icon isn't stretched */
 }
+
+.offline-notice {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    font-family: sans-serif;
+    color: #666;
+    background: #f4f4f4;
+    text-align: center;
+}
+.offline-notice h2 { font-size: 2.5em; margin: 0 0 0.3em; color: #444; }
+.offline-notice p  { font-size: 1.3em; margin: 0.2em 0; }
+.offline-notice .offline-device {
+    margin-top: 1.5em;
+    font-family: monospace;
+    font-size: 1em;
+    color: #999;
+}

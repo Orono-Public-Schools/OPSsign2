@@ -2,10 +2,8 @@
     <meta charset="UTF-8">
     <title>Live TV Stream</title>
     <link rel="stylesheet" href="/css/modules.css">
-    <!-- Use the lightweight and standard hls.js library -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
-        /* Template-specific styles for fullscreen video */
         body, html {
             overflow: hidden;
             background-color: #000;
@@ -22,56 +20,238 @@
             width: 100%;
             height: 100%;
         }
+        /* Subtle reconnect indicator — a small pulsing dot, not a scary error page.
+           The display just looks like a brief signal blip, then recovers. */
+        #reconnect-indicator {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #e0a800;
+            opacity: 0;
+            transition: opacity 0.5s;
+            animation: pulse 1.2s ease-in-out infinite;
+        }
+        #reconnect-indicator.visible { opacity: 0.85; }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.4); }
+        }
     </style>
 </head>
-
-<!-- This hidden container is required to make the template compatible with the main app script -->
+<!-- Hidden container required for compatibility with the main app script -->
 <div id="slideContainer" style="display: none;"></div>
-
 <div id="video-container">
-    <video id="video" autoplay playsinline></video>
+    <!-- muted is REQUIRED for autoplay on kiosk Chromium/WebOS -->
+    <video id="video" autoplay muted playsinline></video>
+    <div id="reconnect-indicator"></div>
 </div>
-
 <script>
-    // This function will initialize the video player.
-    function initializePlayer() {
-        console.log('Live TV template: "templateReady" event received. Initializing with hls.js.');
-        const video = document.getElementById('video');
-        const deviceConfig = window.deviceConfig; // Now guaranteed to be available
-        const streamUrl = deviceConfig?.streamUrl;
+(function () {
+    'use strict';
 
-        console.log('Attempting to load stream. URL from config:', streamUrl);
+    // --- Tuning ---
+    var RETRY_BASE_MS = 2000;          // First retry delay after a fatal error
+    var RETRY_MAX_MS = 30000;          // Backoff cap — keep trying forever at this rate
+    var WATCHDOG_INTERVAL_MS = 10000;  // How often to check playback is actually advancing
+    var WATCHDOG_STALL_LIMIT = 3;      // Consecutive stalled checks before forcing a rebuild
+    var NIGHTLY_RELOAD_HOUR = 3;       // Full page reload at 3am to clear accumulated MSE/renderer state
 
-        if (streamUrl) {
-            // Use the robust FFmpeg proxy, which provides a clean, compliant stream.
-            const base64Url = btoa(streamUrl);
-            const proxiedUrl = `/api/hls-proxy/${base64Url}/index.m3u8`;
-            console.log('Using proxied URL:', proxiedUrl);
-            
-            if (Hls.isSupported()) {
-                const hls = new Hls();
+    var video = document.getElementById('video');
+    var indicator = document.getElementById('reconnect-indicator');
 
-                // Basic error handling for hls.js
-                hls.on(Hls.Events.ERROR, function (event, data) {
-                    if (data.fatal) {
-                        console.error(`HLS.js FATAL ERROR: Type: ${data.type}, Details: ${data.details}`);
-                        document.getElementById('video-container').innerHTML = `<div class="module-error"><h2>Stream Error</h2><p>Could not load the video stream. Please check the stream source and network connection.</p><p style="font-size: 0.8em; color: #aaa;">Details: ${data.details}</p></div>`;
-                    }
-                });
+    var hls = null;
+    var proxiedUrl = null;
+    var retryDelay = RETRY_BASE_MS;
+    var retryTimer = null;
+    var destroyed = false;
 
-                hls.loadSource(proxiedUrl);
-                hls.attachMedia(video);
-                hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    video.play().catch(e => console.error("Autoplay was prevented:", e));
-                });
-            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                // Fallback for native HLS support (e.g., Safari)
-                video.src = proxiedUrl;
-            }
-        } else {
-            document.getElementById('video-container').innerHTML = '<div class="module-error"><h2>Configuration Error</h2><p>No stream URL has been configured for this device.</p></div>';
+    // Watchdog state
+    var lastTime = -1;
+    var stallCount = 0;
+
+    function log(msg) { console.log('[LiveTV] ' + msg); }
+
+    function showReconnecting(on) {
+        indicator.classList.toggle('visible', !!on);
+    }
+
+    // Tear down the current hls.js instance completely.
+    function teardown() {
+        if (hls) {
+            try { hls.destroy(); } catch (e) { /* ignore */ }
+            hls = null;
         }
     }
 
+    // Schedule a full player rebuild with exponential backoff.
+    // This is the universal answer to any unrecoverable condition:
+    // never show a permanent error, never give up.
+    function scheduleRebuild(reason) {
+        if (destroyed || retryTimer) return;
+        log('Rebuilding player in ' + retryDelay + 'ms (reason: ' + reason + ')');
+        showReconnecting(true);
+        teardown();
+        retryTimer = setTimeout(function () {
+            retryTimer = null;
+            var delay = retryDelay;
+            retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+            buildPlayer();
+        }, retryDelay);
+    }
+
+    function buildPlayer() {
+        if (destroyed) return;
+        teardown();
+
+        if (!Hls.isSupported()) {
+            // Native HLS fallback (Safari/WebOS native player). Rebuild on error.
+            video.src = proxiedUrl;
+            video.addEventListener('error', function () { scheduleRebuild('native video error'); }, { once: true });
+            video.play().catch(function (e) { log('Autoplay prevented: ' + e); });
+            return;
+        }
+
+        hls = new Hls({
+            // CRITICAL for 24/7 kiosks: cap the back buffer. The default keeps
+            // already-played media in memory indefinitely and relies on browser
+            // eviction, which eventually OOMs the renderer on a Pi ("Aw, Snap!").
+            backBufferLength: 30,
+
+            // Keep a modest forward buffer — enough to ride out proxy segment
+            // jitter, small enough to bound memory.
+            maxBufferLength: 20,
+            maxMaxBufferLength: 40,
+
+            // Stay near the live edge (also keeps adjacent TVs in closer sync).
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 8,
+
+            // Be patient with the proxy during FFmpeg restarts: retry playlist
+            // and fragment loads generously before declaring a fatal error.
+            manifestLoadingMaxRetry: 6,
+            manifestLoadingRetryDelay: 1000,
+            levelLoadingMaxRetry: 6,
+            levelLoadingRetryDelay: 1000,
+            fragLoadingMaxRetry: 6,
+            fragLoadingRetryDelay: 1000,
+
+            enableWorker: true
+        });
+
+        hls.on(Hls.Events.ERROR, function (event, data) {
+            if (!data.fatal) return; // hls.js handles non-fatal errors internally
+
+            log('Fatal hls.js error: ' + data.type + ' / ' + data.details);
+            switch (data.type) {
+                case Hls.ErrorTypes.NETWORK_ERROR:
+                    // Proxy briefly down (FFmpeg restart, encoder blip).
+                    // Try in-place recovery first; if that fails the error
+                    // will fire again and escalate to a rebuild.
+                    if (!hls._triedStartLoad) {
+                        hls._triedStartLoad = true;
+                        log('Attempting hls.startLoad() recovery');
+                        showReconnecting(true);
+                        hls.startLoad();
+                    } else {
+                        scheduleRebuild('network error persisted');
+                    }
+                    break;
+                case Hls.ErrorTypes.MEDIA_ERROR:
+                    // Decode/buffer trouble. hls.js has a built-in recovery
+                    // path; use it once, then escalate.
+                    if (!hls._triedMediaRecover) {
+                        hls._triedMediaRecover = true;
+                        log('Attempting hls.recoverMediaError()');
+                        showReconnecting(true);
+                        hls.recoverMediaError();
+                    } else {
+                        scheduleRebuild('media error persisted');
+                    }
+                    break;
+                default:
+                    scheduleRebuild('unrecoverable error type: ' + data.type);
+            }
+        });
+
+        hls.on(Hls.Events.FRAG_BUFFERED, function () {
+            // Healthy playback: clear the reconnect indicator, reset backoff
+            // and the per-instance recovery flags.
+            showReconnecting(false);
+            retryDelay = RETRY_BASE_MS;
+            if (hls) {
+                hls._triedStartLoad = false;
+                hls._triedMediaRecover = false;
+            }
+        });
+
+        hls.on(Hls.Events.MANIFEST_PARSED, function () {
+            video.play().catch(function (e) { log('Autoplay prevented: ' + e); });
+        });
+
+        hls.loadSource(proxiedUrl);
+        hls.attachMedia(video);
+    }
+
+    // --- Watchdog: catches silent stalls that never raise an error event ---
+    setInterval(function () {
+        if (destroyed || !proxiedUrl) return;
+        // Only meaningful when we believe we're playing
+        if (retryTimer) { lastTime = -1; stallCount = 0; return; }
+
+        var t = video.currentTime;
+        if (t === lastTime && !video.paused) {
+            stallCount++;
+            log('Watchdog: playback stalled (' + stallCount + '/' + WATCHDOG_STALL_LIMIT + ') at t=' + t);
+            if (stallCount >= WATCHDOG_STALL_LIMIT) {
+                stallCount = 0;
+                scheduleRebuild('watchdog stall');
+            }
+        } else {
+            stallCount = 0;
+        }
+        lastTime = t;
+
+        // Belt and suspenders: if the element paused itself somehow, resume.
+        if (video.paused && !retryTimer) {
+            video.play().catch(function () { /* retried next tick */ });
+        }
+    }, WATCHDOG_INTERVAL_MS);
+
+    // --- Nightly full reload: clears accumulated MSE/renderer state ---
+    // A long-lived Chromium tab playing MSE video accrues memory that no
+    // amount of in-page hygiene fully reclaims. One reload a night keeps
+    // the renderer young. Fires only during the target hour, once.
+    setInterval(function () {
+        var now = new Date();
+        if (now.getHours() === NIGHTLY_RELOAD_HOUR && now.getMinutes() < 2) {
+            log('Nightly maintenance reload');
+            location.reload();
+        }
+    }, 60000);
+
+    // --- Entry point ---
+    function initializePlayer() {
+        log('templateReady received. Initializing.');
+        var deviceConfig = window.deviceConfig;
+        var streamUrl = deviceConfig && deviceConfig.streamUrl;
+
+        if (!streamUrl) {
+            // Config errors are the one case a message is appropriate —
+            // but keep retrying anyway, in case config appears later.
+            log('No streamUrl configured; will re-check periodically.');
+            document.getElementById('video-container').insertAdjacentHTML('beforeend',
+                '<div class="module-error"><h2>Configuration Error</h2><p>No stream URL has been configured for this device.</p></div>');
+            return;
+        }
+
+        proxiedUrl = '/api/hls-proxy/' + btoa(streamUrl) + '/index.m3u8';
+        log('Proxied URL: ' + proxiedUrl);
+        buildPlayer();
+    }
+
     window.addEventListener('templateReady', initializePlayer, { once: true });
+})();
 </script>

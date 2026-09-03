@@ -222,7 +222,9 @@
             
             // Create iframe with optimized parameters for full-screen
             const iframe = document.createElement('iframe');
-            iframe.src = `https://docs.google.com/presentation/d/${slideId}/embed?start=true&loop=true&delayms=5000&rm=minimal&slide=1`;
+            iframe.src = slideId.startsWith('2PACX-')
+                ? `https://docs.google.com/presentation/d/e/${slideId}/embed?start=true&loop=true&delayms=5000&rm=minimal&slide=1`
+                : `https://docs.google.com/presentation/d/${slideId}/embed?start=true&loop=true&delayms=5000&rm=minimal&slide=1`;
             iframe.style.width = '100%';
             iframe.style.height = '100%';
             iframe.style.border = 'none';
