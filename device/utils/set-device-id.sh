@@ -41,8 +41,7 @@ if [ ${#DEVICE_ID} -gt 63 ]; then
 fi
 
 # --- Refuse to write into a filesystem that will discard it ----------------
-if grep -qw "boot=overlay" /proc/cmdline 2>/dev/null || \
-   [ "$(findmnt -n -o SOURCE / 2>/dev/null)" = "overlay" ]; then
+if [ "$(findmnt -n -o FSTYPE / 2>/dev/null)" = "overlay" ]; then
     echo "The read-only overlay is active. Any change made now is discarded at"
     echo "the next reboot. Turn it off first:"
     echo "  sudo $OPSSIGN_ROOT/utils/setup-overlay.sh disable && sudo reboot"

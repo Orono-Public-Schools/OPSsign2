@@ -26,8 +26,7 @@ done
 [[ $EUID -eq 0 ]] || { echo "Must be run as root (use sudo)"; exit 1; }
 
 overlay_active() {
-    grep -qw "boot=overlay" /proc/cmdline 2>/dev/null || \
-    [ "$(findmnt -n -o SOURCE / 2>/dev/null)" = "overlay" ]
+    [ "$(findmnt -n -o FSTYPE / 2>/dev/null)" = "overlay" ]
 }
 
 echo "Resetting OPSsign2 kiosk on $(hostname)..."

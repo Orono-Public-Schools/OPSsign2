@@ -23,10 +23,54 @@ if [[ $EUID -ne 0 ]] && [ "$ACTION" != "status" ]; then
 fi
 
 boot_mount() { [ -d /boot/firmware ] && echo /boot/firmware || echo /boot; }
+cmdline_file() { echo "$(boot_mount)/cmdline.txt"; }
 
+# Detect by filesystem TYPE - "overlay" for both implementations. The mount
+# SOURCE differs (overlay vs overlayroot) and must not be tested.
 overlay_active() {
-    grep -qw "boot=overlay" /proc/cmdline 2>/dev/null || \
-    [ "$(findmnt -n -o SOURCE / 2>/dev/null)" = "overlay" ]
+    [ "$(findmnt -n -o FSTYPE / 2>/dev/null)" = "overlay" ]
+}
+
+overlay_mechanism() {
+    if grep -q "overlayroot=" "$(cmdline_file)" 2>/dev/null \
+       || dpkg -l overlayroot 2>/dev/null | grep -q "^ii"; then
+        echo "overlayroot"
+    else
+        echo "raspi-config"
+    fi
+}
+
+_boot_rw() { mount -o remount,rw "$(boot_mount)" 2>/dev/null || true; }
+
+overlay_off() {
+    local cl; cl=$(cmdline_file)
+    case "$(overlay_mechanism)" in
+        overlayroot)
+            _boot_rw
+            sed -i -e "s/[[:space:]]*overlayroot=[^[:space:]]*//g" "$cl"
+            sed -i -e "s/^[[:space:]]*//" -e "s/[[:space:]]*$//" "$cl"
+            ! grep -q "overlayroot=" "$cl"
+            ;;
+        *)
+            raspi-config nonint do_overlayfs 1 || return 1
+            overlay_active || raspi-config nonint disable_bootro 2>/dev/null || true
+            ;;
+    esac
+}
+
+overlay_on() {
+    local cl; cl=$(cmdline_file)
+    case "$(overlay_mechanism)" in
+        overlayroot)
+            _boot_rw
+            grep -q "overlayroot=tmpfs" "$cl" || sed -i -e "s/$/ overlayroot=tmpfs/" "$cl"
+            sed -i -e "s/[[:space:]]\+/ /g" -e "s/^ //" -e "s/ $//" "$cl"
+            grep -q "overlayroot=tmpfs" "$cl"
+            ;;
+        *)
+            raspi-config nonint do_overlayfs 0
+            ;;
+    esac
 }
 
 set_conf() {
@@ -70,7 +114,13 @@ UNIT
 case "$ACTION" in
   status)
     echo "Overlay filesystem: $(overlay_active && echo ACTIVE || echo inactive)"
-    echo "Root mount source:  $(findmnt -n -o SOURCE / 2>/dev/null)"
+    echo "Mechanism:          $(overlay_mechanism)"
+    echo "Root fstype/source: $(findmnt -n -o FSTYPE / 2>/dev/null) / $(findmnt -n -o SOURCE / 2>/dev/null)"
+    if [ "$(overlay_mechanism)" = "overlayroot" ]; then
+        echo "Kernel cmdline:     $(grep -o 'overlayroot=[^ ]*' "$(cmdline_file)" 2>/dev/null || echo '(no overlayroot= token)')"
+        echo "  NOTE: the kernel cmdline overrides /etc/overlayroot.conf entirely."
+        echo "        Editing that conf file has no effect while the token is set."
+    fi
     echo "Boot partition:     $(boot_mount) [$(findmnt -n -o OPTIONS "$(boot_mount)" 2>/dev/null | cut -d, -f1)]"
     echo "Desired state:      $(grep '^OVERLAY_ENABLED=' "$CONF" 2>/dev/null || echo 'OVERLAY_ENABLED=(unset)')"
     echo "Resume unit:        $([ -f "/etc/systemd/system/$RESUME_UNIT" ] && echo installed || echo 'NOT INSTALLED')"
@@ -110,9 +160,8 @@ case "$ACTION" in
     echo "  Syncing pending disk writes..."
     sync
 
-    echo "Enabling overlay filesystem and write-protecting the boot partition..."
-    # One argument drives both: 0 = overlay on + /boot read-only.
-    raspi-config nonint do_overlayfs 0 || { echo "FAILED"; exit 1; }
+    echo "Enabling overlay filesystem ($(overlay_mechanism))..."
+    overlay_on || { echo "FAILED"; exit 1; }
 
     cat <<'NOTE'
 
@@ -132,11 +181,8 @@ NOTE
 
   disable)
     set_conf OVERLAY_ENABLED false
-    echo "Disabling overlay filesystem and unlocking the boot partition..."
-    raspi-config nonint do_overlayfs 1 || { echo "FAILED"; exit 1; }
-    # do_overlayfs skips the boot-partition half while an overlay is live,
-    # so make sure fstab is unlocked once we are running without one.
-    overlay_active || raspi-config nonint disable_bootro 2>/dev/null || true
+    echo "Disabling overlay filesystem ($(overlay_mechanism))..."
+    overlay_off || { echo "FAILED"; exit 1; }
     echo "Overlay disabled. Reboot for a writable filesystem: sudo reboot"
     ;;
 

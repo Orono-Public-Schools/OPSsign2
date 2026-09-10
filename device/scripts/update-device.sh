@@ -13,6 +13,22 @@
 
 set -uo pipefail
 
+# --- Self-overwrite guard ---------------------------------------------------
+# This script copies device/scripts/* over /opt/opssign/scripts/, which
+# includes THIS FILE. Bash reads a script incrementally by byte offset, so
+# rewriting it mid-run makes execution resume at that offset inside the NEW
+# file - producing a syntax error somewhere unrelated, after some of the work
+# has already happened. Re-exec from a private copy in /tmp so the file on
+# disk can be replaced safely underneath us.
+if [ "${OPSSIGN_REEXEC:-}" != "1" ]; then
+    _self=$(mktemp /tmp/opssign-update-XXXXXX.sh) || exit 1
+    cat "$0" > "$_self" || exit 1
+    chmod +x "$_self"
+    OPSSIGN_REEXEC=1 export OPSSIGN_REEXEC
+    exec "$_self" "$@"
+fi
+trap 'rm -f "$0"' EXIT
+
 REPO_URL="https://github.com/Orono-Public-Schools/OPSsign2.git"
 OPSSIGN_ROOT="/opt/opssign"
 CONF="$OPSSIGN_ROOT/config/device.conf"
@@ -49,25 +65,71 @@ fail() { echo "[$(date '+%H:%M:%S')] ERROR: $*"; exit 1; }
 [ -f "$CONF" ] && source "$CONF"
 OVERLAY_DESIRED=${OVERLAY_ENABLED:-false}
 
-# --- Overlay helpers -------------------------------------------------------
-# raspi-config has no do_bootro. do_overlayfs takes ONE argument and applies it
-# to both the overlay question and the boot-write-protect question:
-#   do_overlayfs 0  -> overlay ON,  /boot read-only
-#   do_overlayfs 1  -> overlay OFF, /boot writable
-# The boot-partition half is skipped when an overlay is live at runtime, so
-# /boot has to be unlocked separately on the reboot after disabling.
+# --- Overlay mechanism ------------------------------------------------------
+# Two implementations exist and they are not interchangeable:
+#   overlayroot (Debian pkg) : "overlayroot=tmpfs" on the kernel cmdline
+#   raspi-config             : "boot=overlay" on the kernel cmdline + initramfs
+# The kernel cmdline always wins over /etc/overlayroot.conf, so editing that
+# conf file does nothing when overlayroot=tmpfs is set at boot.
+# Detection is by filesystem TYPE, which is "overlay" for both; the mount
+# SOURCE differs ("overlay" vs "overlayroot") and must not be tested.
 
 overlay_active() {
-    grep -qw "boot=overlay" /proc/cmdline 2>/dev/null || \
-    [ "$(findmnt -n -o SOURCE / 2>/dev/null)" = "overlay" ]
+    [ "$(findmnt -n -o FSTYPE / 2>/dev/null)" = "overlay" ]
 }
 
 boot_mount() { [ -d /boot/firmware ] && echo /boot/firmware || echo /boot; }
+cmdline_file() { echo "$(boot_mount)/cmdline.txt"; }
+
+overlay_mechanism() {
+    if grep -q "overlayroot=" "$(cmdline_file)" 2>/dev/null \
+       || dpkg -l overlayroot 2>/dev/null | grep -q "^ii"; then
+        echo "overlayroot"
+    else
+        echo "raspi-config"
+    fi
+}
+
+_boot_rw() { mount -o remount,rw "$(boot_mount)" 2>/dev/null || true; }
+
+overlay_off() {
+    local cl; cl=$(cmdline_file)
+    case "$(overlay_mechanism)" in
+        overlayroot)
+            _boot_rw
+            # cmdline.txt must stay a single line.
+            sed -i -e "s/[[:space:]]*overlayroot=[^[:space:]]*//g" "$cl"
+            sed -i -e "s/^[[:space:]]*//" -e "s/[[:space:]]*$//" "$cl"
+            grep -q "overlayroot=" "$cl" && return 1
+            ;;
+        *)
+            raspi-config nonint do_overlayfs 1 || return 1
+            overlay_active || raspi-config nonint disable_bootro 2>/dev/null || true
+            ;;
+    esac
+    return 0
+}
+
+overlay_on() {
+    local cl; cl=$(cmdline_file)
+    case "$(overlay_mechanism)" in
+        overlayroot)
+            _boot_rw
+            grep -q "overlayroot=tmpfs" "$cl" || \
+                sed -i -e "s/$/ overlayroot=tmpfs/" "$cl"
+            sed -i -e "s/[[:space:]]\+/ /g" -e "s/^ //" -e "s/ $//" "$cl"
+            grep -q "overlayroot=tmpfs" "$cl" || return 1
+            ;;
+        *)
+            raspi-config nonint do_overlayfs 0 || return 1
+            ;;
+    esac
+    return 0
+}
 
 unlock_boot() {
     raspi-config nonint disable_bootro 2>/dev/null || true
-    findmnt -n -o OPTIONS "$(boot_mount)" | grep -qw ro && \
-        mount -o remount,rw "$(boot_mount)" 2>/dev/null || true
+    _boot_rw
 }
 
 set_stage() { echo "$1" > "$MARKER"; }
@@ -92,7 +154,7 @@ if [ "$IS_RESUME" = true ]; then
 
     if [ "$STAGE" = "overlay" ]; then
         log "Kernel is current. Re-enabling read-only overlay..."
-        raspi-config nonint do_overlayfs 0 || { clear_staging; fail "could not enable overlayfs"; }
+        overlay_on || { clear_staging; fail "could not re-enable the overlay"; }
         clear_staging
         log "Overlay restored. Rebooting into normal operation."
         sleep 3; reboot; exit 0
@@ -111,7 +173,7 @@ if [ "$IS_RESUME" = false ] && [ "$DO_APT" = true ] && overlay_active; then
     [ -f "/etc/systemd/system/$RESUME_UNIT" ] \
         || fail "$RESUME_UNIT not installed. Run: sudo $OPSSIGN_ROOT/utils/setup-overlay.sh install"
     log "Staging the update to run on the next boot."
-    raspi-config nonint do_overlayfs 1 || fail "could not disable overlayfs"
+    overlay_off || fail "could not disable the overlay"
     set_stage "apt"
     systemctl enable "$RESUME_UNIT" >/dev/null 2>&1 || fail "could not enable $RESUME_UNIT"
     log "Rebooting into a writable filesystem. The update continues automatically."
@@ -179,6 +241,10 @@ for file in device/config/*; do
             cp "$file" "/etc/systemd/system/$filename"
             log "  systemd unit: $filename"
             ;;
+        opssign-logrotate)
+            cp "$file" /etc/logrotate.d/opssign
+            log "  logrotate: /etc/logrotate.d/opssign"
+            ;;
         *)
             cp "$file" "$OPSSIGN_ROOT/config/"
             log "  config: $filename"
@@ -211,7 +277,7 @@ if [ "$IS_RESUME" = true ]; then
     fi
 
     log "Re-enabling read-only overlay..."
-    raspi-config nonint do_overlayfs 0 || { clear_staging; fail "could not enable overlayfs"; }
+    overlay_on || { clear_staging; fail "could not re-enable the overlay"; }
     clear_staging
     log "Update complete. Rebooting into normal operation."
     sleep 3; reboot; exit 0

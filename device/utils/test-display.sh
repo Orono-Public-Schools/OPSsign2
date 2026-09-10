@@ -152,9 +152,10 @@ fi
 
 # --- Filesystem ------------------------------------------------------------
 hr "Filesystem and storage"
-if grep -qw "boot=overlay" /proc/cmdline 2>/dev/null || \
-   [ "$(findmnt -n -o SOURCE / 2>/dev/null)" = "overlay" ]; then
+if [ "$(findmnt -n -o FSTYPE / 2>/dev/null)" = "overlay" ]; then
     ok "read-only overlay ACTIVE (changes will not survive reboot)"
+    echo "         Root: $(findmnt -n -o SOURCE / 2>/dev/null) - writes go to RAM."
+    echo "         To make a persistent change: sudo overlayroot-chroot"
 else
     warn "overlay inactive - card is being written to during normal operation"
     echo "         sudo $OPSSIGN_ROOT/utils/setup-overlay.sh enable"
