@@ -108,7 +108,13 @@ WantedBy=multi-user.target
 UNIT
     fi
     systemctl daemon-reload
-    echo "  Installed $RESUME_UNIT"
+    # Enable it permanently at install time. Under a live overlay, a
+    # "systemctl enable" during staging would write to the root filesystem and
+    # be discarded at the reboot it is needed for. ConditionPathExists on the
+    # marker keeps it inert until there is actually work to do.
+    systemctl enable "$RESUME_UNIT" >/dev/null 2>&1 \
+        && echo "  Installed and enabled $RESUME_UNIT" \
+        || echo "  Installed $RESUME_UNIT (could not enable - check systemctl)"
 }
 
 case "$ACTION" in
@@ -124,7 +130,9 @@ case "$ACTION" in
     echo "Boot partition:     $(boot_mount) [$(findmnt -n -o OPTIONS "$(boot_mount)" 2>/dev/null | cut -d, -f1)]"
     echo "Desired state:      $(grep '^OVERLAY_ENABLED=' "$CONF" 2>/dev/null || echo 'OVERLAY_ENABLED=(unset)')"
     echo "Resume unit:        $([ -f "/etc/systemd/system/$RESUME_UNIT" ] && echo installed || echo 'NOT INSTALLED')"
-    echo "Pending stage:      $(cat "$OPSSIGN_ROOT/.update-stage" 2>/dev/null || echo none)"
+    MK=$([ -d /boot/firmware ] && echo /boot/firmware || echo /boot)/opssign-update-stage
+    echo "Resume unit state:  $(systemctl is-enabled "$RESUME_UNIT" 2>/dev/null || echo 'not enabled')"
+    echo "Pending stage:      $(cat "$MK" 2>/dev/null || echo none)  [$MK]"
     ;;
 
   install)

@@ -1,9 +1,12 @@
 [Unit]
-Description=OPSsign2 deferred device update (runs after overlay is disabled)
+Description=OPSsign2 staged device update (runs with the overlay disabled)
 After=network-online.target
 Wants=network-online.target
 Before=getty@tty1.service
-ConditionPathExists=/opt/opssign/.update-pending
+# The marker lives on the boot partition, outside the overlay, so it survives
+# the reboot that staging depends on. This unit stays permanently enabled and
+# is gated entirely by the presence of that file.
+ConditionPathExists=/boot/firmware/opssign-update-stage
 
 [Service]
 Type=oneshot

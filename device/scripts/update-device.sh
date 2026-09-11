@@ -33,7 +33,14 @@ REPO_URL="https://github.com/Orono-Public-Schools/OPSsign2.git"
 OPSSIGN_ROOT="/opt/opssign"
 CONF="$OPSSIGN_ROOT/config/device.conf"
 LOG_DIR="$OPSSIGN_ROOT/logs"
-MARKER="$OPSSIGN_ROOT/.update-stage"
+# The staging marker MUST live outside the overlay. /opt is on the root
+# filesystem, so a marker written there during staging goes to RAM and is gone
+# at the very reboot it exists to survive. /boot/firmware is vfat, outside the
+# overlay, and already writable.
+MARKER_DIR_PRIMARY="/boot/firmware"
+MARKER_DIR_FALLBACK="/boot"
+[ -d "$MARKER_DIR_PRIMARY" ] && MARKER="$MARKER_DIR_PRIMARY/opssign-update-stage" \
+                            || MARKER="$MARKER_DIR_FALLBACK/opssign-update-stage"
 RESUME_UNIT="opssign-update-resume.service"
 TEMP_DIR="/tmp/opssign-update-$$"
 BACKUP_DIR="$OPSSIGN_ROOT/backup/$(date +%Y%m%d-%H%M%S)"
@@ -132,12 +139,20 @@ unlock_boot() {
     _boot_rw
 }
 
-set_stage() { echo "$1" > "$MARKER"; }
+set_stage() {
+    _boot_rw
+    echo "$1" > "$MARKER" || fail "could not write the staging marker to $MARKER"
+    sync
+}
 get_stage() { cat "$MARKER" 2>/dev/null || echo ""; }
 
 clear_staging() {
+    _boot_rw
     rm -f "$MARKER"
-    systemctl disable "$RESUME_UNIT" >/dev/null 2>&1 || true
+    sync
+    # The unit stays enabled: it is gated by ConditionPathExists on the marker,
+    # and "systemctl enable" writes to the root filesystem, which under the
+    # overlay would not persist either.
 }
 
 # ===========================================================================
@@ -175,7 +190,8 @@ if [ "$IS_RESUME" = false ] && [ "$DO_APT" = true ] && overlay_active; then
     log "Staging the update to run on the next boot."
     overlay_off || fail "could not disable the overlay"
     set_stage "apt"
-    systemctl enable "$RESUME_UNIT" >/dev/null 2>&1 || fail "could not enable $RESUME_UNIT"
+    systemctl is-enabled "$RESUME_UNIT" >/dev/null 2>&1 \
+        || fail "$RESUME_UNIT is not enabled. Run: sudo $OPSSIGN_ROOT/utils/setup-overlay.sh install"
     log "Rebooting into a writable filesystem. The update continues automatically."
     sleep 3; reboot; exit 0
 fi
