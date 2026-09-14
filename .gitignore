@@ -7,7 +7,12 @@ npm-debug.log*
 
 # Service account keys (sensitive)
 service-account-key.json
-*.json
+credentials.json
+client_secret*.json
+
+# but the dependency manifest must be tracked
+!package.json
+!package-lock.json
 
 # Logs
 logs/
