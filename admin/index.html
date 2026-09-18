@@ -180,6 +180,7 @@
 			            <option value="schedule-rotation">Schedule (Rotation)</option>
                         <option value="athletics-wide">Athletics (Wide)</option>
                         <option value="live-tv">Live TV Stream</option>
+                        <option value="car-rider">Car Rider Pro</option>
                     </select>
                 </div>
                 <div class="form-group" id="streamUrl-group" style="display: none;">
@@ -198,6 +199,13 @@
                     <a href="#" id="hudlInstructionsLink" class="instructions-link" style="display: none;">(Instructions)</a>                    
                     <input type="text" id="slideId" name="slideId" 
                            placeholder="Extracted from link above, or enter manually">
+                    <small id="crpZoneHint" style="display: none;">
+                        Zone IDs — Schumann: <code>1164</code> &middot;
+                        IS Back Loop: <code>1165</code> &middot;
+                        IS Front Loop: <code>1357</code><br>
+                        Use <code>?zone=</code> on the bare portal URL. A
+                        <code>#queuemanager/</code> link will not load on a display.
+                    </small>    
                 </div>
                 <div class="form-group">
                     <label for="presentationDuration">Slideshow Duration (seconds):</label>
@@ -217,7 +225,6 @@
                     <span id="scrollSpeedValue">1.0x</span>
                     <small style="display: block; margin-top: 5px; color: #666;">How fast to scroll through schedule (0.5x = slower, 2.0x = faster)</small>
                 </div>
-
                 <script>
                 // Update scroll speed display
                 document.getElementById('scrollSpeed')?.addEventListener('input', function(e) {

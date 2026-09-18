@@ -479,12 +479,14 @@ class AdminInterface {
         const presentationLinkGroup = document.getElementById('presentationLink').parentElement;
         const hudlInstructionsLink = document.getElementById('hudlInstructionsLink');
         const streamUrlGroup = document.getElementById('streamUrl-group');
+        const crpZoneHint = document.getElementById('crpZoneHint');
 
         // Hide all special groups first
         slideIdGroup.style.display = 'none';
         presentationLinkGroup.style.display = 'none';
         if (hudlInstructionsLink) hudlInstructionsLink.style.display = 'none';
         if (streamUrlGroup) streamUrlGroup.style.display = 'none';
+        if (crpZoneHint) crpZoneHint.style.display = 'none';
 
         if (templateValue === 'hudl') {
             slideIdGroup.style.display = 'block';
@@ -495,6 +497,11 @@ class AdminInterface {
             // Show only the stream URL field for stream-based templates
             // The 'athletics-schedule' template also uses this for its own purposes.
             if (streamUrlGroup) streamUrlGroup.style.display = 'block';
+        } else if (templateValue === 'car-rider') {
+            slideIdGroup.style.display = 'block';
+            slideIdLabel.textContent = 'Car Rider Pro URL';
+            slideIdInput.placeholder = 'https://www.carriderpro.com/schoolportal?zone=1165';
+            if (crpZoneHint) crpZoneHint.style.display = 'block';
         } else {
             // Default behavior for slide-based templates
             slideIdGroup.style.display = 'block';
