@@ -186,6 +186,12 @@
             padding: 6px 10px;
         }
 
+        .mshsl-logo {
+            height: 90px;
+            width: auto;
+            veritcal-align: middle;
+        }
+
         .schedule-header-building {
             font-size: 1.6em;
             font-weight: bold;
@@ -290,7 +296,7 @@
                 <div id="scheduleContent" style="display: none; height: 100%; display: flex; flex-direction: column;">
                     <div class="schedule-header">
                         <img src="/assets/OPS_banner_v1.png" alt="Orono Schools Logo" class="schedule-header-logo">
-                        <h1>Athletic Schedule</h1>
+                        <h1>MSHSL <img src="/assets/mshsl-logo.svg" alt="MSHSL Logo" class="mshsl-logo" /> Activities</h1>
                         <div class="schedule-header-building">{BUILDING_NAME}</div>
                     </div>
                     <div class="schedule-content" id="eventsList"></div>

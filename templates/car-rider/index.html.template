@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Car Rider Pro - {LOCATION}</title>
+    <link rel="stylesheet" href="{THEME_PATH}">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            background-color: #000;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        /* Full-bleed: dismissal staff need every pixel for the rider list. */
+        #crpContainer {
+            position: fixed;
+            inset: 0;
+            background-color: #fff;
+        }
+
+        #crpFrame {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }
+
+        /* Loading state, shown until the frame reports load */
+        #crpLoading {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #1a1a1a;
+            color: #fff;
+            z-index: 10;
+            transition: opacity .4s ease;
+        }
+
+        #crpLoading.hidden { opacity: 0; pointer-events: none; }
+
+        .spinner {
+            width: 48px; height: 48px;
+            border: 4px solid rgba(255,255,255,.15);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #crpLoading .label { font-size: 1.1rem; letter-spacing: .04em; opacity: .85; }
+        #crpLoading .sub   { font-size: .8rem; margin-top: 8px; opacity: .45; }
+
+        /* Error state */
+        #crpError {
+            position: fixed;
+            inset: 0;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #7f1d1d;
+            color: #fff;
+            z-index: 20;
+            text-align: center;
+            padding: 40px;
+        }
+
+        #crpError h1 { font-size: 2rem; margin-bottom: 12px; }
+        #crpError p  { font-size: 1rem; opacity: .85; max-width: 40ch; line-height: 1.5; }
+        #crpError .device { font-size: .75rem; margin-top: 24px; opacity: .5; }
+
+        /* Device identifier, hidden until the mouse moves (kiosks have no mouse) */
+        #deviceOverlay {
+            position: fixed;
+            bottom: 8px; right: 12px;
+            background: rgba(0,0,0,.65);
+            color: #fff;
+            font-size: .7rem;
+            padding: 4px 10px;
+            border-radius: 4px;
+            opacity: 0;
+            transition: opacity .3s ease;
+            z-index: 30;
+            pointer-events: none;
+        }
+
+        body:hover #deviceOverlay { opacity: 1; }
+    </style>
+</head>
+<body>
+
+    <div id="crpContainer">
+        <iframe id="crpFrame"
+                title="Car Rider Pro"
+                allow="fullscreen"
+                referrerpolicy="no-referrer-when-downgrade"></iframe>
+    </div>
+
+    <div id="crpLoading">
+        <div class="spinner"></div>
+        <div class="label">Loading Car Rider Pro</div>
+        <div class="sub">{LOCATION}</div>
+    </div>
+
+    <div id="crpError">
+        <h1>Car Rider Pro unavailable</h1>
+        <p id="crpErrorDetail">The dismissal portal did not load. It will keep retrying automatically.</p>
+        <div class="device">{DEVICE_ID} &middot; {LOCATION}</div>
+    </div>
+
+    <div id="deviceOverlay">{DEVICE_ID} &middot; {LOCATION}</div>
+
+    <script>
+    (function () {
+        'use strict';
+
+        // The URL comes from the slideId column when set, so a single template
+        // can serve more than one portal. Falls back to the district default.
+        var DEFAULT_URL = 'https://www.carriderpro.com/schoolportal';
+        var configured  = '{PRESENTATION_ID}';
+        var CRP_URL     = (configured && /^https?:\/\//i.test(configured)) ? configured : DEFAULT_URL;
+
+        // OPSsign mints a CarRiderPro token server-side and we pass it to the
+        // frame as a query parameter. The opssign-crp browser extension reads
+        // it inside the carriderpro.com origin, writes it to localStorage and
+        // strips it from the URL, so the portal boots already signed in.
+        // Without the extension installed this is simply ignored and the
+        // display falls back to showing the normal login screen.
+        var TOKEN_ENDPOINT = '/api/crp/token';
+        var currentToken   = null;
+
+        // Which dismissal queue this display shows, from ?zone=<id> in the
+        // slideId column. One template serves every zone; the sheet row is the
+        // only thing that differs between displays.
+        //
+        // Deliberately NOT the #queuemanager/<id> route: queuemanager.js
+        // activate(zoneId) skips datacontextQueue.initialize() when a zone is
+        // in the route, so on a cold display boot zones() is empty and the app
+        // throws. Loading the bare portal initialises properly and then reads
+        // the zone from localStorage, which the extension seeds.
+        var zoneMatch   = CRP_URL.match(/[?&]zone=(\d+)/i);
+        var ZONE_ID     = zoneMatch ? zoneMatch[1] : null;
+
+        // init() requires the school to match before it honours a stored zone.
+        var schoolMatch = CRP_URL.match(/[?&]school=(\d+)/i);
+        var SCHOOL_ID   = schoolMatch ? schoolMatch[1] : '125';
+
+        // Our own parameters must not reach CRP as part of its own URL.
+        CRP_URL = CRP_URL.replace(/[?&](zone|school)=\d+/gi, '')
+                         .replace(/\?&/, '?').replace(/\?$/, '');
+
+        // Unattended kiosk: reload periodically so a hung page, dropped socket
+        // or expired view recovers without anyone driving out to the building.
+        var RELOAD_MINUTES  = 30;
+        var LOAD_TIMEOUT_MS = 45000;
+
+        var frame     = document.getElementById('crpFrame');
+        var loading   = document.getElementById('crpLoading');
+        var errorPane = document.getElementById('crpError');
+        var detail    = document.getElementById('crpErrorDetail');
+
+        var loadTimer  = null;
+        var retryCount = 0;
+
+        function showError(msg) {
+            if (msg) { detail.textContent = msg; }
+            errorPane.style.display = 'flex';
+        }
+
+        function hideError() {
+            errorPane.style.display = 'none';
+        }
+
+        function fetchToken() {
+            return fetch(TOKEN_ENDPOINT, { cache: 'no-store' })
+                .then(function (r) {
+                    if (!r.ok) { throw new Error('token endpoint returned ' + r.status); }
+                    return r.json();
+                })
+                .then(function (d) {
+                    currentToken = d.access_token || null;
+                    console.log('[car-rider] token expires ' + d.expires + (d.cached ? ' (cached)' : ''));
+                })
+                .catch(function (e) {
+                    // Non-fatal: the frame still loads, staff just see a login.
+                    currentToken = null;
+                    console.warn('[car-rider] no token available:', e.message);
+                });
+        }
+
+        function load() {
+            hideError();
+            loading.classList.remove('hidden');
+            // Always take a fresh token: it costs nothing (the server caches)
+            // and it means an expired session heals on the next refresh cycle.
+            fetchToken().then(loadFrame);
+        }
+
+        function loadFrame() {
+
+            clearTimeout(loadTimer);
+            loadTimer = setTimeout(function () {
+                retryCount++;
+                console.warn('[car-rider] load timed out (attempt ' + retryCount + ')');
+                showError('The dismissal portal did not respond within ' +
+                          (LOAD_TIMEOUT_MS / 1000) + ' seconds. Retrying...');
+                // Back off a little, but never stop trying.
+                setTimeout(load, Math.min(retryCount, 6) * 10000);
+            }, LOAD_TIMEOUT_MS);
+
+            // CRP uses client-side hash routes (#queuemanager/1165). A cache-
+            // buster must go in the query string BEFORE the hash, or it lands
+            // inside the fragment and breaks the route.
+            var hashAt = CRP_URL.indexOf('#');
+            var base   = hashAt === -1 ? CRP_URL : CRP_URL.slice(0, hashAt);
+            var hash   = hashAt === -1 ? ''      : CRP_URL.slice(hashAt);
+            var sep    = base.indexOf('?') === -1 ? '?' : '&';
+            var query  = '_t=' + Date.now();
+            if (currentToken) {
+                query += '&opssign_token=' + encodeURIComponent(currentToken);
+            }
+            if (ZONE_ID) {
+                query += '&opssign_zone=' + encodeURIComponent(ZONE_ID);
+            }
+            if (ZONE_ID && SCHOOL_ID) {
+                query += '&opssign_school=' + encodeURIComponent(SCHOOL_ID);
+            }
+            var target = base + sep + query + hash;
+
+            // Cycle through about:blank first. Assigning a src that differs only
+            // in its hash would not trigger a reload, and the iframe is
+            // cross-origin so contentWindow.location.reload() is unavailable.
+            frame.src = 'about:blank';
+            setTimeout(function () { frame.src = target; }, 50);
+            console.log('[car-rider] loading ' + base + hash
+                + (currentToken ? ' (with token)' : ' (no token)')
+                + (ZONE_ID ? ' zone=' + ZONE_ID : ''));
+        }
+
+        frame.addEventListener('load', function () {
+            // about:blank also fires load; ignore that transitional one.
+            if (!frame.src || frame.src === 'about:blank') { return; }
+            clearTimeout(loadTimer);
+            retryCount = 0;
+            hideError();
+            loading.classList.add('hidden');
+            console.log('[car-rider] frame loaded');
+        });
+
+        frame.addEventListener('error', function () {
+            clearTimeout(loadTimer);
+            showError('The dismissal portal returned an error. Retrying...');
+            setTimeout(load, 15000);
+        });
+
+        // Periodic refresh
+        setInterval(function () {
+            console.log('[car-rider] scheduled refresh');
+            load();
+        }, RELOAD_MINUTES * 60 * 1000);
+
+        // Recover after a network outage
+        window.addEventListener('online', function () {
+            console.log('[car-rider] network back, reloading');
+            load();
+        });
+
+        // public/index.html fires this once the device config has been applied.
+        if (window.__opssignConfigReady) {
+            load();
+        } else {
+            window.addEventListener('templateReady', load, { once: true });
+            // Safety net in case the event has already fired.
+            setTimeout(function () {
+                if (!frame.src || frame.src === 'about:blank') { load(); }
+            }, 2000);
+        }
+    })();
+    </script>
+</body>
+</html>

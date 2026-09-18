@@ -10,7 +10,8 @@ const { google } = require('googleapis');
 const path = require('path');
 const ping = require('ping');
 const fs = require('fs');
-const hlsProxyRouter = require('./hls-proxy'); // Import the new HLS proxy
+const hlsProxyRouter = require('./hls-proxy');
+const crpTokenRouter = require('./crp-token'); 
 const ical = require('node-ical');
 
 const app = express();
@@ -2822,8 +2823,11 @@ app.get('/api/stream-proxy', async (req, res) => {
     }
 });
 
-// --- NEW: Use the robust FFmpeg HLS Proxy ---
+// --- Use the robust FFmpeg HLS Proxy ---
 app.use('/api/hls-proxy', hlsProxyRouter);
+
+// Car Rider Pro Token Registration Route
+app.use('/api/crp', crpTokenRouter); 
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

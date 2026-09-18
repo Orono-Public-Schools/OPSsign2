@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "OPSsign Car Rider Pro Bridge",
+  "version": "1.0.0",
+  "description": "Seeds a server-minted CarRiderPro access token into localStorage so OPSsign dismissal displays come up already signed in.",
+  "content_scripts": [
+    {
+      "matches": ["*://www.carriderpro.com/*"],
+      "all_frames": true,
+      "run_at": "document_start",
+      "js": ["content.js"]
+    }
+  ]
+}
