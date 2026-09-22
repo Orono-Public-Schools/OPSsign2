@@ -91,20 +91,19 @@
             font-size: .7rem;
             padding: 4px 10px;
             border-radius: 4px;
-            opacity: 0;
             transition: opacity .3s ease;
             z-index: 30;
             pointer-events: none;
         }
 
-        body:hover #deviceOverlay { opacity: 1; }
+        #deviceOverlay { opacity: 1; }
+        #deviceOverlay.hidden { opacity: 0; }
     </style>
 </head>
 <body>
 
     <div id="crpContainer">
         <iframe id="crpFrame"
-                title="Car Rider Pro"
                 allow="fullscreen"
                 referrerpolicy="no-referrer-when-downgrade"></iframe>
     </div>
@@ -183,6 +182,11 @@
         function hideError() {
             errorPane.style.display = 'none';
         }
+        
+        setTimeout(function () {
+            var ov = document.getElementById('deviceOverlay');
+            if (ov) { ov.classList.add('hidden'); }
+        }, 10000);
 
         function fetchToken() {
             return fetch(TOKEN_ENDPOINT, { cache: 'no-store' })
