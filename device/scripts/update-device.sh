@@ -245,6 +245,19 @@ log "Repository commit: $(git rev-parse --short HEAD) - $(git log -1 --format=%s
 install -d "$OPSSIGN_ROOT/scripts" "$OPSSIGN_ROOT/utils" "$OPSSIGN_ROOT/config"
 cp device/scripts/* "$OPSSIGN_ROOT/scripts/"
 cp device/utils/*   "$OPSSIGN_ROOT/utils/"
+
+# Browser extensions. Each is a directory; replace wholesale so files removed
+# from the repo are removed on the device too.
+if [ -d device/extensions ]; then
+    install -d "$OPSSIGN_ROOT/extensions"
+    for ext_dir in device/extensions/*/; do
+        [ -f "${ext_dir}manifest.json" ] || continue
+        ext_name=$(basename "$ext_dir")
+        rm -rf "$OPSSIGN_ROOT/extensions/$ext_name"
+        cp -r "$ext_dir" "$OPSSIGN_ROOT/extensions/$ext_name"
+        log "  extension: $ext_name"
+    done
+fi
 chmod +x "$OPSSIGN_ROOT/scripts/"* "$OPSSIGN_ROOT/utils/"*
 log "Scripts and utilities updated."
 
@@ -270,6 +283,7 @@ done
 systemctl daemon-reload
 
 chown -R opssign:opssign "$OPSSIGN_ROOT/scripts" "$OPSSIGN_ROOT/utils" "$OPSSIGN_ROOT/config"
+[ -d "$OPSSIGN_ROOT/extensions" ] && chown -R opssign:opssign "$OPSSIGN_ROOT/extensions"
 cd /; rm -rf "$TEMP_DIR"
 
 # --- Finish ----------------------------------------------------------------

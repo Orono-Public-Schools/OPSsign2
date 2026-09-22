@@ -27,6 +27,13 @@ DESIGN_HEIGHT=${DESIGN_HEIGHT:-1080}
 # auto = derive from panel height. Set a number in device.conf to override.
 DISPLAY_SCALE=${DISPLAY_SCALE:-auto}
 
+# Optional browser extensions, as extension directory names under
+# /opt/opssign/extensions, comma-separated. Set per device in device.conf:
+#     EXTENSIONS=opssign-crp
+# Unset means no extensions, and Chromium keeps --disable-extensions.
+EXTENSIONS=${EXTENSIONS:-}
+EXTENSIONS_ROOT="/opt/opssign/extensions"
+
 # Log to file AND console. Using a bare "exec >> $LOG" hides all output,
 # including bash -x traces, at exactly the moment something is going wrong.
 if [ -t 1 ] || [ -n "${OPSSIGN_VERBOSE:-}" ]; then
@@ -118,6 +125,29 @@ fi
 # --- Launch ----------------------------------------------------------------
 echo "Launching: $CHROMIUM_BIN -> ${SERVER_URL}/?deviceId=${DEVICE_ID}"
 
+# --- Extensions ---------------------------------------------------------------
+# --disable-extensions blocks --load-extension, so it is only passed when no
+# extensions are configured. When some are, --disable-extensions-except keeps
+# everything else (including anything a user might add) switched off.
+EXT_FLAGS=(--disable-extensions)
+if [ -n "$EXTENSIONS" ]; then
+    EXT_PATHS=""
+    IFS=',' read -ra EXT_LIST <<< "$EXTENSIONS"
+    for ext in "${EXT_LIST[@]}"; do
+        ext="${ext// /}"
+        [ -z "$ext" ] && continue
+        if [ -f "$EXTENSIONS_ROOT/$ext/manifest.json" ]; then
+            EXT_PATHS="${EXT_PATHS:+$EXT_PATHS,}$EXTENSIONS_ROOT/$ext"
+            echo "Loading extension: $ext"
+        else
+            echo "WARNING: extension '$ext' not found at $EXTENSIONS_ROOT/$ext - skipping"
+        fi
+    done
+    if [ -n "$EXT_PATHS" ]; then
+        EXT_FLAGS=(--load-extension="$EXT_PATHS" --disable-extensions-except="$EXT_PATHS")
+    fi
+fi
+
 exec "$CHROMIUM_BIN" \
     --kiosk \
     --start-fullscreen \
@@ -132,7 +162,7 @@ exec "$CHROMIUM_BIN" \
     --noerrdialogs \
     --disable-infobars \
     --disable-dev-tools \
-    --disable-extensions \
+    "${EXT_FLAGS[@]}" \
     --disable-translate \
     --disable-features=TranslateUI \
     --disable-session-crashed-bubble \
