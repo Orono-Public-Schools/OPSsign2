@@ -1,21 +1,256 @@
-<!DOCTYPE html>
-<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hudl Livestream</title>
-    <link rel="stylesheet" href="/style.css">
-    <link rel="stylesheet" href="{THEME_PATH}">
+    <link rel="stylesheet" href="/css/modules.css">
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
-        /* Ensure the container fills the screen with a black background */
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #000; }
-        #slideContainer { width: 100%; height: 100%; }
+        body, html {
+            overflow: hidden;
+            background-color: #000;
+        }
+        #video-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        #video {
+            width: 100%;
+            height: 100%;
+        }
+        /* Subtle reconnect indicator — a small pulsing dot, not a scary error page.
+           The display just looks like a brief signal blip, then recovers. */
+        #reconnect-indicator {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #e0a800;
+            opacity: 0;
+            transition: opacity 0.5s;
+            animation: pulse 1.2s ease-in-out infinite;
+        }
+        #reconnect-indicator.visible { opacity: 0.85; }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.4); }
+        }
     </style>
 </head>
-<body>
-    <!-- The main script will populate this container with the Hudl iframe -->
-    <div id="slideContainer">
-        <div class="loading">Loading Hudl Stream...</div>
-    </div>
-</body>
-</html>
+<!-- Hidden container required for compatibility with the main app script -->
+<div id="slideContainer" style="display: none;"></div>
+<div id="video-container">
+    <!-- muted is REQUIRED for autoplay on kiosk Chromium/WebOS -->
+    <video id="video" autoplay muted playsinline></video>
+    <div id="reconnect-indicator"></div>
+</div>
+<script>
+(function () {
+    'use strict';
+
+    // --- Tuning ---
+    var RETRY_BASE_MS = 2000;          // First retry delay after a fatal error
+    var RETRY_MAX_MS = 30000;          // Backoff cap — keep trying forever at this rate
+    var WATCHDOG_INTERVAL_MS = 10000;  // How often to check playback is actually advancing
+    var WATCHDOG_STALL_LIMIT = 3;      // Consecutive stalled checks before forcing a rebuild
+    var NIGHTLY_RELOAD_HOUR = 3;       // Full page reload at 3am to clear accumulated MSE/renderer state
+
+    var video = document.getElementById('video');
+    var indicator = document.getElementById('reconnect-indicator');
+
+    var hls = null;
+    var proxiedUrl = null;
+    var retryDelay = RETRY_BASE_MS;
+    var retryTimer = null;
+    var destroyed = false;
+
+    // Watchdog state
+    var lastTime = -1;
+    var stallCount = 0;
+
+    function log(msg) { console.log('[Hudl] ' + msg); }
+
+    function showReconnecting(on) {
+        indicator.classList.toggle('visible', !!on);
+    }
+
+    // Tear down the current hls.js instance completely.
+    function teardown() {
+        if (hls) {
+            try { hls.destroy(); } catch (e) { /* ignore */ }
+            hls = null;
+        }
+    }
+
+    // Schedule a full player rebuild with exponential backoff.
+    // This is the universal answer to any unrecoverable condition:
+    // never show a permanent error, never give up.
+    function scheduleRebuild(reason) {
+        if (destroyed || retryTimer) return;
+        log('Rebuilding player in ' + retryDelay + 'ms (reason: ' + reason + ')');
+        showReconnecting(true);
+        teardown();
+        retryTimer = setTimeout(function () {
+            retryTimer = null;
+            var delay = retryDelay;
+            retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+            buildPlayer();
+        }, retryDelay);
+    }
+
+    function buildPlayer() {
+        if (destroyed) return;
+        teardown();
+
+        if (!Hls.isSupported()) {
+            // Native HLS fallback (Safari/WebOS native player). Rebuild on error.
+            video.src = proxiedUrl;
+            video.addEventListener('error', function () { scheduleRebuild('native video error'); }, { once: true });
+            video.play().catch(function (e) { log('Autoplay prevented: ' + e); });
+            return;
+        }
+
+        hls = new Hls({
+            // CRITICAL for 24/7 kiosks: cap the back buffer. The default keeps
+            // already-played media in memory indefinitely and relies on browser
+            // eviction, which eventually OOMs the renderer on a Pi ("Aw, Snap!").
+            backBufferLength: 30,
+
+            // Keep a modest forward buffer — enough to ride out proxy segment
+            // jitter, small enough to bound memory.
+            maxBufferLength: 20,
+            maxMaxBufferLength: 40,
+
+            // Stay near the live edge (also keeps adjacent TVs in closer sync).
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 8,
+
+            // Be patient with the proxy during FFmpeg restarts: retry playlist
+            // and fragment loads generously before declaring a fatal error.
+            manifestLoadingMaxRetry: 6,
+            manifestLoadingRetryDelay: 1000,
+            levelLoadingMaxRetry: 6,
+            levelLoadingRetryDelay: 1000,
+            fragLoadingMaxRetry: 6,
+            fragLoadingRetryDelay: 1000,
+
+            enableWorker: true
+        });
+
+        hls.on(Hls.Events.ERROR, function (event, data) {
+            if (!data.fatal) return; // hls.js handles non-fatal errors internally
+
+            log('Fatal hls.js error: ' + data.type + ' / ' + data.details);
+            switch (data.type) {
+                case Hls.ErrorTypes.NETWORK_ERROR:
+                    // Proxy briefly down (FFmpeg restart, encoder blip).
+                    // Try in-place recovery first; if that fails the error
+                    // will fire again and escalate to a rebuild.
+                    if (!hls._triedStartLoad) {
+                        hls._triedStartLoad = true;
+                        log('Attempting hls.startLoad() recovery');
+                        showReconnecting(true);
+                        hls.startLoad();
+                    } else {
+                        scheduleRebuild('network error persisted');
+                    }
+                    break;
+                case Hls.ErrorTypes.MEDIA_ERROR:
+                    // Decode/buffer trouble. hls.js has a built-in recovery
+                    // path; use it once, then escalate.
+                    if (!hls._triedMediaRecover) {
+                        hls._triedMediaRecover = true;
+                        log('Attempting hls.recoverMediaError()');
+                        showReconnecting(true);
+                        hls.recoverMediaError();
+                    } else {
+                        scheduleRebuild('media error persisted');
+                    }
+                    break;
+                default:
+                    scheduleRebuild('unrecoverable error type: ' + data.type);
+            }
+        });
+
+        hls.on(Hls.Events.FRAG_BUFFERED, function () {
+            // Healthy playback: clear the reconnect indicator, reset backoff
+            // and the per-instance recovery flags.
+            showReconnecting(false);
+            retryDelay = RETRY_BASE_MS;
+            if (hls) {
+                hls._triedStartLoad = false;
+                hls._triedMediaRecover = false;
+            }
+        });
+
+        hls.on(Hls.Events.MANIFEST_PARSED, function () {
+            video.play().catch(function (e) { log('Autoplay prevented: ' + e); });
+        });
+
+        hls.loadSource(proxiedUrl);
+        hls.attachMedia(video);
+    }
+
+    // --- Watchdog: catches silent stalls that never raise an error event ---
+    setInterval(function () {
+        if (destroyed || !proxiedUrl) return;
+        // Only meaningful when we believe we're playing
+        if (retryTimer) { lastTime = -1; stallCount = 0; return; }
+
+        var t = video.currentTime;
+        if (t === lastTime && !video.paused) {
+            stallCount++;
+            log('Watchdog: playback stalled (' + stallCount + '/' + WATCHDOG_STALL_LIMIT + ') at t=' + t);
+            if (stallCount >= WATCHDOG_STALL_LIMIT) {
+                stallCount = 0;
+                scheduleRebuild('watchdog stall');
+            }
+        } else {
+            stallCount = 0;
+        }
+        lastTime = t;
+
+        // Belt and suspenders: if the element paused itself somehow, resume.
+        if (video.paused && !retryTimer) {
+            video.play().catch(function () { /* retried next tick */ });
+        }
+    }, WATCHDOG_INTERVAL_MS);
+
+    // --- Nightly full reload: clears accumulated MSE/renderer state ---
+    // A long-lived Chromium tab playing MSE video accrues memory that no
+    // amount of in-page hygiene fully reclaims. One reload a night keeps
+    // the renderer young. Fires only during the target hour, once.
+    setInterval(function () {
+        var now = new Date();
+        if (now.getHours() === NIGHTLY_RELOAD_HOUR && now.getMinutes() < 2) {
+            log('Nightly maintenance reload');
+            location.reload();
+        }
+    }, 60000);
+
+    // --- Entry point ---
+    // The Hudl feed comes from the Focus camera on the stadium press box,
+    // remuxed RTMP->HLS by the hudl-hls.service systemd unit on this server
+    // and served by nginx from /var/www/hudl (tmpfs). The URL is fixed and
+    // same-origin, so there is nothing to configure per device and no need
+    // for the hls-proxy: ffmpeg is already producing well-formed HLS.
+    //
+    // When no game is being recorded, the camera serves Hudl's "Start a
+    // recording to see your live video feed" placeholder card. That is the
+    // intended idle state — it shows the signage is alive with no game on.
+    var STREAM_URL = '/hudl/game.m3u8';
+
+    function initializePlayer() {
+        log('templateReady received. Initializing.');
+        proxiedUrl = STREAM_URL;
+        log('Stream URL: ' + proxiedUrl);
+        buildPlayer();
+    }
+
+    window.addEventListener('templateReady', initializePlayer, { once: true });
+})();
+</script>
