@@ -2829,6 +2829,15 @@ app.use('/api/hls-proxy', hlsProxyRouter);
 // Car Rider Pro Token Registration Route
 app.use('/api/crp', crpTokenRouter); 
 
+// Hudl Focus camera HLS stream (produced by hudl-hls.service -> /var/www/hudl tmpfs)
+app.use('/hudl', express.static('/var/www/hudl', {
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.m3u8')) {
+            res.setHeader('Cache-Control', 'no-cache');
+        }
+    }
+}));
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
