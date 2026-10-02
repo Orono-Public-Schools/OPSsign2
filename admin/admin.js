@@ -434,6 +434,17 @@ class AdminInterface {
                 `;
             }
 
+            const isScheduled = alert.active && alert.starts && new Date(alert.starts) > new Date();
+            let startsHTML = '';
+            if (alert.starts) {
+                startsHTML = `
+                    <div class="alert-starts">
+                        <span class="info-label">Starts:</span>
+                        <span class="info-value"></span>
+                    </div>
+                `;
+            }
+
             card.innerHTML = `
                 <div class="alert-header">
                     <div class="alert-title">
@@ -451,6 +462,7 @@ class AdminInterface {
                         <span class="info-label">Buildings:</span>
                         <span class="buildings-list"></span>
                     </div>
+                    ${startsHTML}
                     ${expiresHTML}
                 </div>
                 
@@ -461,6 +473,11 @@ class AdminInterface {
                     </button>
                     <button class="btn btn-danger" data-action="delete" data-id="${alert.alertId}">Delete</button>
             `;
+
+            const startsValue = card.querySelector('.alert-starts .info-value');
+            if (startsValue) {
+                startsValue.textContent = new Date(alert.starts).toLocaleString() + (isScheduled ? ' (scheduled)' : '');
+            }
 
             card.querySelector('h3').textContent = alert.name || '[No Name]';
             
@@ -851,6 +868,7 @@ class AdminInterface {
         // Populate common fields
         document.getElementById('alertName').value = alert.name;
         document.getElementById('priority').value = alert.priority;
+        document.getElementById('starts').value = alert.starts || '';
         document.getElementById('expires').value = alert.expires || '';
         document.getElementById('alertActive').checked = alert.active;
 
@@ -1082,6 +1100,7 @@ document.addEventListener('DOMContentLoaded', function() {
             type: type,
             name: formData.get('name'),
             priority: formData.get('priority'),
+            starts: formData.get('starts'),
             expires: formData.get('expires'),
             active: formData.has('active'),
             buildings: Array.from(document.querySelectorAll('input[name="buildings"]:checked')).map(cb => cb.value)

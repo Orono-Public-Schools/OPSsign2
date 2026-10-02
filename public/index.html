@@ -75,6 +75,7 @@
 
                         // Set up periodic refresh
                         this.setupRefresh();
+                        this.scheduleAlertCheck();
 
                     } else {
                         const errorText = await response.text();
@@ -91,6 +92,14 @@
                         this.applyDefaultConfiguration();
                     }, 5000);
                 }
+            }
+
+            scheduleAlertCheck() {
+                if (this.alertTimer) { clearTimeout(this.alertTimer); this.alertTimer = null; }
+                const ms = this.config.nextAlertChangeMs;
+                if (ms == null || ms <= 0) return;
+                // setTimeout caps at ~24.8 days; an early wake-up just reschedules itself
+                this.alertTimer = setTimeout(() => this.loadDeviceConfig(), Math.min(ms + 2000, 2147483647));
             }
 
             async applyConfiguration() {

@@ -1159,7 +1159,7 @@ async function fetchAlertsSheet() {
 }
 
 // Parse alerts data and filter for active alerts
-function parseAlertsData(rows) {
+function parseAlertsData(rows, { includePending = false } = {}) {
   if (rows.length === 0) return [];
 
   const headers = rows[0];
@@ -1187,6 +1187,15 @@ function parseAlertsData(rows) {
         const expirationDate = new Date(alert.expires);
         if (expirationDate <= new Date()) {
           continue; // Skip expired alerts
+        }
+      }
+
+      // Check start time
+      if (alert.starts && alert.starts !== '') {
+        const startDate = new Date(alert.starts);
+        if (!isNaN(startDate) && startDate > new Date()) {
+          if (!includePending) continue; // Not started yet
+          alert.isPending = true;
         }
       }
 
@@ -1243,6 +1252,26 @@ function parseAllAlertsDataForAdmin(rows) {
     }
   }
   return alerts;
+}
+
+function getNextAlertChangeMs(alerts) {
+  const now = Date.now();
+  let next = null;
+  for (const a of alerts) {
+    for (const field of ['starts', 'expires']) {
+      if (!a[field]) continue;
+      const t = new Date(a[field]).getTime();
+      if (!isNaN(t) && t > now && (next === null || t < next)) next = t;
+    }
+  }
+  return next === null ? null : next - now;
+}
+
+function validateAlertTimes(starts, expires) {
+  if (starts && expires && new Date(starts) >= new Date(expires)) {
+    return 'Start time must be before the expiration time.';
+  }
+  return null;
 }
 
 // Get alerts for a specific building
@@ -1793,7 +1822,7 @@ app.get('/api/device-config/:deviceId', async (req, res) => {
     ]);
 
     const devices = parseSheetData(displayRows);
-    const alerts = parseAlertsData(alertRows);
+    const alerts = parseAlertsData(alertRows, { includePending: true });
 
     // Find device configuration
     const rawDeviceConfig = devices.find(device => device.deviceId === deviceId);
@@ -1807,11 +1836,15 @@ app.get('/api/device-config/:deviceId', async (req, res) => {
       // Add building name to the config
       deviceConfig.buildingName = BUILDING_NAMES[deviceConfig.building] || deviceConfig.building;
             
-      // Get alerts for this device's building
-      const deviceAlerts = getAlertsForBuilding(alerts, deviceConfig.building);
+      // Get alerts for this device's building (includes not-yet-started ones)
+      const buildingAlerts = getAlertsForBuilding(alerts, deviceConfig.building);
       
-      // Add alerts to the device configuration
+      // Only alerts that have already started go to the device
+      const deviceAlerts = buildingAlerts.filter(a => !a.isPending);
       deviceConfig.alerts = deviceAlerts;
+      
+      // Tells the device when to re-check for the next start/expiration
+      deviceConfig.nextAlertChangeMs = getNextAlertChangeMs(buildingAlerts);
       
       console.log(`Found ${deviceAlerts.length} alerts for building: ${deviceConfig.building}, slideId: ${deviceConfig.slideId}`);
       
@@ -1830,6 +1863,7 @@ app.get('/api/device-config/:deviceId', async (req, res) => {
         building: '',
         buildingName: 'Unconfigured Device',
         alerts: [], // No alerts for unconfigured devices
+        nextAlertChangeMs: null,
         lastUpdated: new Date().toISOString()
       };
 
@@ -2180,10 +2214,19 @@ app.post('/api/admin/alerts', requireAuthWithPermissions, async (req, res) => {
       });
     }
 
+    // Validate start/expiration times
+    const timeError = validateAlertTimes(newAlert.starts, newAlert.expires);
+    if (timeError) {
+      return res.status(400).json({ error: 'Invalid times', message: timeError });
+    }
+
     // Process the alert config (convert URLs to IDs if needed)
     const processedAlert = processDeviceConfig(newAlert);
 
     if (sheets) {
+      const timeError = validateAlertTimes(newAlert.starts, newAlert.expires);
+      if (timeError) return res.status(400).json({ error: 'Invalid times', message: timeError });
+
       const alertWithId = await addAlertToSheet(processedAlert);
       console.log(`✅ Alert ${alertWithId.alertId} added to Google Sheets by ${req.user.emails[0].value}`);
 
@@ -2292,6 +2335,16 @@ app.put('/api/admin/alerts/:alertId', requireAuthWithPermissions, async (req, re
         });
       }
     }
+
+    // validate start/expiration times
+    const timeError = validateAlertTimes(
+      updates.starts !== undefined ? updates.starts : existingAlert.starts,
+      updates.expires !== undefined ? updates.expires : existingAlert.expires
+    );
+    if (timeError) {
+      return res.status(400).json({ error: 'Invalid times', message: timeError });
+    }
+
 
     // Process the updates (convert URLs to IDs if needed)
     const processedUpdates = processDeviceConfig(updates);
